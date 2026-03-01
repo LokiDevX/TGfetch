@@ -4,10 +4,11 @@
   "description": "TGfetch – Premium Telegram Media Downloader",
   "main": "dist-electron/main.js",
   "author": {
-    "name": "Loki",
-    "email": "youremail@example.com"
+    "name": "Lokesh Navale",
+    "email": "youremail@example.com",
+    "url": "https://www.linkedin.com/in/lokesh-navale/"
   },
-  "homepage": "https://github.com/yourusername/tgfetch",
+  "homepage": "https://github.com/LokiDevX/TGfetch",
   "private": true,
   "scripts": {
     "dev": "concurrently \"vite\" \"npm run electron-dev\"",
@@ -47,9 +48,9 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.loki.tgfetch",
+    "appId": "com.lokidevx.tgfetch",
     "productName": "TGfetch",
-    "copyright": "Copyright © 2024 Loki",
+    "copyright": "Copyright © 2024 Lokesh Navale",
     "icon": "public/icon.png",
     "directories": {
       "output": "release"

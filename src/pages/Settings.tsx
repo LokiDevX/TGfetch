@@ -161,7 +161,7 @@ export function Settings(): JSX.Element {
           <motion.button
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.96 }}
-            onClick={() => window.tgfetch.shell.openExternal('https://github.com')}
+            onClick={() => window.tgfetch.shell.openExternal('https://github.com/LokiDevX/TGfetch')}
             className="flex items-center gap-1.5 text-xs text-white/40 hover:text-white/70 transition-colors"
           >
             Open <ExternalLink className="w-3 h-3" />
@@ -171,12 +171,12 @@ export function Settings(): JSX.Element {
         <SettingsRow
           icon={<Linkedin className="w-4 h-4" />}
           title="LinkedIn"
-          description="Connect with Loki"
+          description="Connect with Lokesh Navale"
         >
           <motion.button
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.96 }}
-            onClick={() => window.tgfetch.shell.openExternal('https://linkedin.com')}
+            onClick={() => window.tgfetch.shell.openExternal('https://www.linkedin.com/in/lokesh-navale/')}
             className="flex items-center gap-1.5 text-xs text-white/40 hover:text-white/70 transition-colors"
           >
             Open <ExternalLink className="w-3 h-3" />
