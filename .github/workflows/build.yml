@@ -17,10 +17,10 @@ jobs:
           node-version: 20
 
       - run: npm install
-      - run: npm run build:win
+      - run: npm run build:electron
 
       - uses: softprops/action-gh-release@v1
         with:
-          files: release/*.exe
+          files: dist/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
