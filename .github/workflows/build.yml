@@ -4,29 +4,23 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Setup Node
-        uses: actions/setup-node@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: 20
 
-      - name: Install dependencies
-        run: npm install
+      - run: npm install
+      - run: npm run build:electron
 
-      - name: Build Electron App
-        run: npm run build:electron
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+      - uses: softprops/action-gh-release@v1
         with:
-          name: TGfetch-Windows
-          path: release/**
+          files: release/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
