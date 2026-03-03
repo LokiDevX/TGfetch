@@ -200,9 +200,7 @@ export class ChannelService {
     if (media.className === 'MessageMediaPhoto') {
       let thumbnail: string | undefined
       try {
-        const photoBuffer = await this.client.downloadMedia(msg, {
-          isBig: false
-        }) as Buffer
+        const photoBuffer = await this.client.downloadMedia(msg, {}) as Buffer
         
         if (photoBuffer) {
           thumbnail = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`
@@ -345,7 +343,7 @@ export class ChannelService {
     for await (const message of iterator) {
       const msg = message as Api.Message
       if (msg.media) {
-        const item = this.messageToMediaItem(msg)
+        const item = await this.messageToMediaItem(msg)
         if (item) {
           items.push(item)
         }

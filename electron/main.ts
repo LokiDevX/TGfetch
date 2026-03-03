@@ -52,8 +52,8 @@ if (!gotLock) {
 /**
  * 🔐 SECURITY: API credentials from environment variables
  */
-const API_ID = Number(process.env.TG_API_ID)
-const API_HASH = process.env.TG_API_HASH
+const API_ID = Number(process.env.TG_API_ID ?? 0)
+const API_HASH = process.env.TG_API_HASH ?? ''
 
 // Validate credentials early
 if (!API_ID || !API_HASH) {
@@ -183,10 +183,17 @@ function initializeServices(): void {
   // Read any saved session BEFORE constructing the service so the TelegramClient
   // is created with the right StringSession — ensuring connect() is called only once.
   const savedForInit = readSessionFile()
-  telegramService = new TelegramService(API_ID, API_HASH, savedForInit?.session ?? '')
+
+  // Ensure API_ID and API_HASH are valid before instantiating TelegramService
+  if (API_ID && API_HASH) {
+    telegramService = new TelegramService(API_ID, API_HASH, savedForInit?.session ?? '')
+  } else {
+    // This should never happen due to the check at startup, but TS doesn't know that
+    telegramService = new TelegramService(0, '', '')
+  }
   
   // Listen to auth status changes and forward to renderer
-  telegramService.onStatusChange((state) => {
+  telegramService?.onStatusChange((state) => {
     sendToRenderer('auth-status', state)
     
     // Initialize channel and download services when authenticated
