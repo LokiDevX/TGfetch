@@ -101,6 +101,17 @@ const tgfetchAPI = {
      * Check if a saved session exists
      */
     hasSession: () => invoke<boolean>('auth:hasSession'),
+
+    /**
+     * Check if API credentials (ID/Hash) are configured
+     */
+    hasCredentials: () => invoke<boolean>('auth:hasCredentials'),
+
+    /**
+     * Save API credentials
+     */
+    setCredentials: (apiId: number, apiHash: string) => 
+      invoke<{ success: boolean; error?: string }>('auth:setCredentials', apiId, apiHash),
     
     /**
      * Restore a previously saved session (auto-login)

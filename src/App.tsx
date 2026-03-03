@@ -20,6 +20,7 @@ import { Sidebar } from './components/Sidebar'
 import { ActivityLog } from './components/ActivityLog'
 import { AuthDialog } from './components/AuthDialog'
 import { SplashScreen } from './components/SplashScreen'
+import { ApiSetupScreen } from './components/ApiSetupScreen'
 
 import { Dashboard } from './pages/Dashboard'
 import { History } from './pages/History'
@@ -32,6 +33,21 @@ import { useDownloadStore } from './store/downloadStore'
 export function App(): JSX.Element {
   const { activePage, theme } = useDownloadStore()
   const [showSplash, setShowSplash] = useState(true)
+  const [needsApiSetup, setNeedsApiSetup] = useState<boolean | null>(null)
+
+  // Check if API setup is needed
+  useEffect(() => {
+    async function checkCredentials() {
+      try {
+        const hasCreds = await window.tgfetch.auth.hasCredentials()
+        setNeedsApiSetup(!hasCreds)
+      } catch (err) {
+        console.error('Failed to check credentials:', err)
+        setNeedsApiSetup(false) // Fallback to avoid blocking if IPC fails
+      }
+    }
+    checkCredentials()
+  }, [])
 
   // Sync Tailwind dark class with persisted theme on startup
   useEffect(() => {
@@ -46,10 +62,20 @@ export function App(): JSX.Element {
     return () => clearTimeout(timer)
   }, [])
 
+  function handleApiSetupComplete(): void {
+    setNeedsApiSetup(false)
+  }
+
   return (
     <div className="flex flex-col h-screen bg-background text-white overflow-hidden font-sans">
+      {/* ── API Setup Screen ────────────────────────────────────────────── */}
+      {needsApiSetup === true && (
+        <ApiSetupScreen onComplete={handleApiSetupComplete} />
+      )}
+
       {/* ── Splash Screen ───────────────────────────────────────────────── */}
       <SplashScreen isVisible={showSplash} />
+
 
       {/* ── Top navigation ─────────────────────────────────────────────── */}
       <Navbar />

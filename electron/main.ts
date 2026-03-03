@@ -19,19 +19,13 @@ import { TelegramService, type SessionData } from './services/telegramService'
 import { ChannelService } from './services/channelService'
 import { DownloadManager } from './services/downloadManager'
 
-import * as dotenv from 'dotenv'
-
-// Load environment variables
-const envPath = path.join(process.cwd(), '.env')
-console.log('Loading .env from:', envPath)
-dotenv.config({ path: envPath })
-
 // ─── Constants ─────────────────────────────────────────────────────────────
 
 const IS_DEV = process.env.NODE_ENV === 'development'
 const USER_DATA = app.getPath('userData')
 const SESSION_FILE = path.join(USER_DATA, 'session.json')
 const HISTORY_FILE = path.join(USER_DATA, 'history.json')
+const CREDENTIALS_FILE = path.join(USER_DATA, 'credentials.json')
 
 // Ensure only a single instance of the app runs. If a second instance
 // is started (e.g. running `npm run dev` a second time), quit the
@@ -50,23 +44,44 @@ if (!gotLock) {
 }
 
 /**
- * 🔐 SECURITY: API credentials from environment variables
+ * 🔐 SECURITY: API credentials from configuration or environment
  */
-const API_ID = Number(process.env.TG_API_ID ?? 0)
-const API_HASH = process.env.TG_API_HASH ?? ''
+let API_ID = Number(process.env.TG_API_ID ?? 0)
+let API_HASH = process.env.TG_API_HASH ?? ''
 
-// Validate credentials early
-if (!API_ID || !API_HASH) {
-  const errorMsg = 'Missing Telegram API credentials. Please set TG_API_ID and TG_API_HASH in environment variables.'
-  console.error(errorMsg)
-  // On production, we might want to show a dialog before quitting
-  app.whenReady().then(() => {
-    dialog.showErrorBox('Configuration Error', errorMsg)
-    app.quit()
-  })
+
+function readCredentials(): { apiId: number; apiHash: string } | null {
+  try {
+    if (fs.existsSync(CREDENTIALS_FILE)) {
+      const raw = fs.readFileSync(CREDENTIALS_FILE, 'utf-8')
+      const data = JSON.parse(raw)
+      if (data.apiId && data.apiHash) {
+        return { apiId: Number(data.apiId), apiHash: String(data.apiHash) }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to read credentials:', err)
+  }
+  return null
+}
+
+function saveCredentials(apiId: number, apiHash: string): void {
+  fs.mkdirSync(path.dirname(CREDENTIALS_FILE), { recursive: true })
+  fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify({ apiId, apiHash }, null, 2), 'utf-8')
+}
+
+// Global initialization state
+let isInitialized = false
+
+// Initialize from stored credentials if possible
+const stored = readCredentials()
+if (stored) {
+  API_ID = stored.apiId
+  API_HASH = stored.apiHash
 }
 
 // ─── Services ──────────────────────────────────────────────────────────────
+
 
 let telegramService: TelegramService
 let channelService: ChannelService | null = null
@@ -180,20 +195,25 @@ function sendToRenderer(event: string, payload: unknown): void {
 // ─── Initialize Services ────────────────────────────────────────────────────
 
 function initializeServices(): void {
-  // Read any saved session BEFORE constructing the service so the TelegramClient
-  // is created with the right StringSession — ensuring connect() is called only once.
+  // If we don't have credentials yet, don't initialize TelegramService.
+  // The UI will prompt the user to provide them.
+  if (!API_ID || !API_HASH) {
+    console.log('No API credentials found. Waiting for setup.')
+    return
+  }
+
+  // Prevent multiple initializations
+  if (isInitialized) return
+
+  // Read any saved session
   const savedForInit = readSessionFile()
 
-  // Ensure API_ID and API_HASH are valid before instantiating TelegramService
-  if (API_ID && API_HASH) {
-    telegramService = new TelegramService(API_ID, API_HASH, savedForInit?.session ?? '')
-  } else {
-    // This should never happen due to the check at startup, but TS doesn't know that
-    telegramService = new TelegramService(0, '', '')
-  }
+  telegramService = new TelegramService(API_ID, API_HASH, savedForInit?.session ?? '')
+  isInitialized = true
   
   // Listen to auth status changes and forward to renderer
-  telegramService?.onStatusChange((state) => {
+  telegramService.onStatusChange((state) => {
+
     sendToRenderer('auth-status', state)
     
     // Initialize channel and download services when authenticated
@@ -242,7 +262,26 @@ function initializeServices(): void {
 // ─── IPC Handlers: Auth ─────────────────────────────────────────────────────
 
 ipcMain.handle('auth:getStatus', () => {
+  if (!telegramService) {
+    return { status: 'idle' }
+  }
   return telegramService.getAuthState()
+})
+
+ipcMain.handle('auth:hasCredentials', (): boolean => {
+  return API_ID !== 0 && API_HASH !== ''
+})
+
+ipcMain.handle('auth:setCredentials', async (_event, apiId: number, apiHash: string) => {
+  try {
+    API_ID = Number(apiId)
+    API_HASH = apiHash
+    saveCredentials(API_ID, API_HASH)
+    initializeServices()
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
 })
 
 ipcMain.handle('auth:hasSession', (): boolean => {
@@ -250,7 +289,11 @@ ipcMain.handle('auth:hasSession', (): boolean => {
 })
 
 ipcMain.handle('auth:restoreSession', async () => {
+  if (!telegramService) {
+    return { success: false, error: 'Telegram service not initialized.' }
+  }
   const saved = readSessionFile()
+
   if (!saved) {
     return { success: false, error: 'No saved session.' }
   }
@@ -266,6 +309,9 @@ ipcMain.handle('auth:restoreSession', async () => {
 })
 
 ipcMain.handle('auth:connect', async () => {
+  if (!telegramService) {
+    return { success: false, error: 'Telegram service not initialized.' }
+  }
   try {
     await telegramService.startPhoneLogin()
     
@@ -296,6 +342,9 @@ ipcMain.handle('auth:connect', async () => {
 })
 
 ipcMain.handle('auth:connectWithQR', async () => {
+  if (!telegramService) {
+    return { success: false, error: 'Telegram service not initialized.' }
+  }
   try {
     await telegramService.startQRLogin()
     
@@ -326,23 +375,26 @@ ipcMain.handle('auth:connectWithQR', async () => {
 })
 
 ipcMain.handle('auth:submitPhone', (_event, phone: string) => {
-  telegramService.submitPhone(phone)
+  if (telegramService) telegramService.submitPhone(phone)
 })
 
 ipcMain.handle('auth:submitCode', (_event, code: string) => {
-  telegramService.submitCode(code)
+  if (telegramService) telegramService.submitCode(code)
 })
 
 ipcMain.handle('auth:submitPassword', (_event, password: string) => {
-  telegramService.submitPassword(password)
+  if (telegramService) telegramService.submitPassword(password)
 })
 
 ipcMain.handle('auth:logout', async () => {
-  await telegramService.logout()
-  deleteSessionFile()
+  if (telegramService) {
+    await telegramService.logout()
+    deleteSessionFile()
+  }
 })
 
 // ─── IPC Handlers: Channels ─────────────────────────────────────────────────
+
 
 ipcMain.handle('channels:getJoined', async () => {
   if (!channelService) {
