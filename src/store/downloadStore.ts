@@ -1,10 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { DownloadStatus, HistoryEntry, ActivityLogItem } from '../types/global'
+import type { DownloadStatus, HistoryEntry, ActivityLogItem, AuthStatus, ChannelInfo, MediaItem } from '../types/global'
 
 export interface Credentials {
-  apiId: string
-  apiHash: string
   channelId: string
   downloadPath: string
 }
@@ -27,13 +25,23 @@ export interface DownloadProgress {
 }
 
 export interface AuthState {
-  isAuthenticated: boolean
-  isConnecting: boolean
-  pendingAction: 'phone' | 'code' | 'password' | null
+  status: AuthStatus
+  phoneNumber?: string
+  error?: string
+  qrCode?: string
 }
 
-export type AppPage = 'dashboard' | 'history' | 'settings'
+export type AuthView =
+  | 'initial'
+  | 'qr'
+  | 'phone'
+  | 'code'
+  | 'password'
+
+export type AppPage = 'dashboard' | 'history' | 'settings' | 'channels' | 'media'
 export type Theme = 'dark' | 'light'
+export type MediaView = 'grid' | 'list'
+export type MediaFilter = 'all' | 'video' | 'document' | 'photo' | 'audio'
 
 interface DownloadStore {
   credentials: Credentials
@@ -49,6 +57,10 @@ interface DownloadStore {
 
   auth: AuthState
   setAuth: (partial: Partial<AuthState>) => void
+  authView: AuthView
+  setAuthView: (view: AuthView) => void
+  authModalOpen: boolean
+  setAuthModalOpen: (open: boolean) => void
 
   history: HistoryEntry[]
   setHistory: (entries: HistoryEntry[]) => void
@@ -65,16 +77,32 @@ interface DownloadStore {
   activityLogOpen: boolean
   setActivityLogOpen: (open: boolean) => void
 
-  showAuthDialog: boolean
-  setShowAuthDialog: (show: boolean) => void
-
-  authDialogInput: string
-  setAuthDialogInput: (val: string) => void
+  // Channel & Media Management
+  channels: ChannelInfo[]
+  setChannels: (channels: ChannelInfo[]) => void
+  
+  selectedChannel: ChannelInfo | null
+  setSelectedChannel: (channel: ChannelInfo | null) => void
+  
+  mediaItems: MediaItem[]
+  setMediaItems: (items: MediaItem[]) => void
+  
+  selectedMediaIds: Set<number>
+  toggleMediaSelection: (messageId: number) => void
+  selectAllMedia: () => void
+  clearMediaSelection: () => void
+  
+  mediaView: MediaView
+  setMediaView: (view: MediaView) => void
+  
+  mediaFilter: MediaFilter
+  setMediaFilter: (filter: MediaFilter) => void
+  
+  mediaSearchQuery: string
+  setMediaSearchQuery: (query: string) => void
 }
 
 const DEFAULT_CREDENTIALS: Credentials = {
-  apiId: '',
-  apiHash: '',
   channelId: '',
   downloadPath: '',
 }
@@ -94,9 +122,7 @@ const DEFAULT_PROGRESS: DownloadProgress = {
 }
 
 const DEFAULT_AUTH: AuthState = {
-  isAuthenticated: false,
-  isConnecting: false,
-  pendingAction: null,
+  status: 'idle',
 }
 
 export const useDownloadStore = create<DownloadStore>()(
@@ -127,6 +153,10 @@ export const useDownloadStore = create<DownloadStore>()(
       auth: DEFAULT_AUTH,
       setAuth: (partial) =>
         set((state) => ({ auth: { ...state.auth, ...partial } })),
+      authView: 'initial',
+      setAuthView: (view) => set({ authView: view }),
+      authModalOpen: false,
+      setAuthModalOpen: (open) => set({ authModalOpen: open }),
 
       history: [],
       setHistory: (entries) => set({ history: entries }),
@@ -134,7 +164,7 @@ export const useDownloadStore = create<DownloadStore>()(
       activePage: 'dashboard',
       setActivePage: (page) => set({ activePage: page }),
 
-      theme: 'dark',
+      theme: 'light',
       setTheme: (theme) => set({ theme }),
 
       sidebarCollapsed: false,
@@ -143,24 +173,58 @@ export const useDownloadStore = create<DownloadStore>()(
       activityLogOpen: true,
       setActivityLogOpen: (open) => set({ activityLogOpen: open }),
 
-      showAuthDialog: false,
-      setShowAuthDialog: (show) => set({ showAuthDialog: show }),
-
-      authDialogInput: '',
-      setAuthDialogInput: (val) => set({ authDialogInput: val }),
+      // Channel & Media Management
+      channels: [],
+      setChannels: (channels) => set({ channels }),
+      
+      selectedChannel: null,
+      setSelectedChannel: (channel) => set({ 
+        selectedChannel: channel,
+        mediaItems: [], // Reset media when changing channels
+        selectedMediaIds: new Set(),
+      }),
+      
+      mediaItems: [],
+      setMediaItems: (items) => set({ mediaItems: items }),
+      
+      selectedMediaIds: new Set(),
+      toggleMediaSelection: (messageId) =>
+        set((state) => {
+          const newSelection = new Set(state.selectedMediaIds)
+          if (newSelection.has(messageId)) {
+            newSelection.delete(messageId)
+          } else {
+            newSelection.add(messageId)
+          }
+          return { selectedMediaIds: newSelection }
+        }),
+      selectAllMedia: () =>
+        set((state) => ({
+          selectedMediaIds: new Set(state.mediaItems.map(item => item.messageId))
+        })),
+      clearMediaSelection: () =>
+        set({ selectedMediaIds: new Set() }),
+      
+      mediaView: 'grid',
+      setMediaView: (view) => set({ mediaView: view }),
+      
+      mediaFilter: 'all',
+      setMediaFilter: (filter) => set({ mediaFilter: filter }),
+      
+      mediaSearchQuery: '',
+      setMediaSearchQuery: (query) => set({ mediaSearchQuery: query }),
     }),
     {
       name: 'tgfetch-store',
       partialize: (state) => ({
         credentials: {
-          apiId: state.credentials.apiId,
-          apiHash: state.credentials.apiHash,
           channelId: state.credentials.channelId,
           downloadPath: state.credentials.downloadPath,
         },
         theme: state.theme,
         sidebarCollapsed: state.sidebarCollapsed,
         activityLogOpen: state.activityLogOpen,
+        mediaView: state.mediaView,
       }),
     }
   )

@@ -1,14 +1,7 @@
 /**
- * electron/main.ts
+ * electron/main-new.ts
  *
- * Electron main process – responsible for:
- *   1. Creating the BrowserWindow
- *   2. Registering all IPC handlers (download, auth, history, etc.)
- *   3. Managing the Telegram gramjs client lifecycle
- *
- * Architecture: All Telegram / Node.js logic lives here.
- * The renderer (React) communicates exclusively through the contextBridge
- * exposed in preload.ts — never via direct Node access.
+ * Refactored Electron main process using service layer architecture
  */
 
 import {
@@ -21,10 +14,10 @@ import {
 } from 'electron'
 import path from 'path'
 import fs from 'fs'
-import os from 'os'
-import { TelegramClient, sessions, errors } from 'telegram'
-const { StringSession } = sessions
-import type { Api } from 'telegram'
+
+import { TelegramService, type SessionData } from './services/telegramService'
+import { ChannelService } from './services/channelService'
+import { DownloadManager } from './services/downloadManager'
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -33,13 +26,35 @@ const USER_DATA = app.getPath('userData')
 const SESSION_FILE = path.join(USER_DATA, 'session.json')
 const HISTORY_FILE = path.join(USER_DATA, 'history.json')
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-interface SessionData {
-  apiId: number
-  apiHash: string
-  session: string
+// Ensure only a single instance of the app runs. If a second instance
+// is started (e.g. running `npm run dev` a second time), quit the
+// second instance and focus the existing window instead.
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = getBrowserWindow()
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
 }
+
+/**
+ * 🔐 SECURITY: API credentials
+ */
+const API_ID = 35192275
+const API_HASH = '482ac56d21bfe3d66572d1727116afe9'
+
+// ─── Services ──────────────────────────────────────────────────────────────
+
+let telegramService: TelegramService
+let channelService: ChannelService | null = null
+let downloadManager: DownloadManager | null = null
+
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 interface HistoryEntry {
   id: string
@@ -53,10 +68,6 @@ interface HistoryEntry {
   errorMessage?: string
 }
 
-// Active gramjs client reference (one at a time)
-let activeClient: TelegramClient | null = null
-let isDownloading = false
-
 // ─── Window ─────────────────────────────────────────────────────────────────
 
 function createWindow(): BrowserWindow {
@@ -68,6 +79,7 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#020617',
     frame: false,
     titleBarStyle: 'hiddenInset',
+    title: 'TGfetch – Telegram Media Manager by Loki',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -75,10 +87,9 @@ function createWindow(): BrowserWindow {
       sandbox: false,
     },
     show: false,
-    icon: path.join(app.getAppPath(), 'public', 'icon.png'),
+    icon: path.join(app.getAppPath(), IS_DEV ? 'public' : 'dist', 'icon.png'),
   })
 
-  // Graceful show after load to avoid white flash
   win.once('ready-to-show', () => {
     win.show()
   })
@@ -92,6 +103,10 @@ function createWindow(): BrowserWindow {
   return win
 }
 
+function getBrowserWindow(): BrowserWindow | undefined {
+  return BrowserWindow.getAllWindows()[0]
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function readSessionFile(): SessionData | null {
@@ -101,7 +116,7 @@ function readSessionFile(): SessionData | null {
       return JSON.parse(raw) as SessionData
     }
   } catch {
-    // Corrupt session file – ignore and return null
+    // Corrupt session file
   }
   return null
 }
@@ -109,6 +124,12 @@ function readSessionFile(): SessionData | null {
 function writeSessionFile(data: SessionData): void {
   fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true })
   fs.writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2), 'utf-8')
+}
+
+function deleteSessionFile(): void {
+  if (fs.existsSync(SESSION_FILE)) {
+    fs.unlinkSync(SESSION_FILE)
+  }
 }
 
 function readHistory(): HistoryEntry[] {
@@ -125,77 +146,291 @@ function readHistory(): HistoryEntry[] {
 
 function appendHistory(entry: HistoryEntry): void {
   const history = readHistory()
-  history.unshift(entry) // newest first
-  const trimmed = history.slice(0, 200) // keep max 200 entries
+  history.unshift(entry)
+  const trimmed = history.slice(0, 200)
   fs.mkdirSync(path.dirname(HISTORY_FILE), { recursive: true })
   fs.writeFileSync(HISTORY_FILE, JSON.stringify(trimmed, null, 2), 'utf-8')
 }
 
-function getBrowserWindow(): BrowserWindow | undefined {
-  return BrowserWindow.getAllWindows()[0]
-}
-
-function normalizeChannel(input: string): string | number {
-  const trimmed = input.trim()   // remove spaces
-
-  // If numeric ID like -1002628823561
-  if (/^-?\d+$/.test(trimmed)) {
-    return Number(trimmed)
-  }
-
-  // If full t.me link
-  if (trimmed.includes("t.me/")) {
-    const parts = trimmed.split("t.me/")[1]
-
-    if (parts.startsWith("c/")) {
-      const id = parts.replace("c/", "")
-      return Number("-100" + id)
-    }
-
-    return "@" + parts.replace("/", "")
-  }
-
-  // If username without @
-  if (!trimmed.startsWith("@")) {
-    return "@" + trimmed
-  }
-
-  return trimmed
-}
-
-/**
- * Send a progress event to the renderer safely.
- */
-function sendProgress(event: string, payload: unknown): void {
+function sendToRenderer(event: string, payload: unknown): void {
   const win = getBrowserWindow()
   if (win && !win.isDestroyed()) {
     win.webContents.send(event, payload)
   }
 }
 
-// ─── IPC Handlers ───────────────────────────────────────────────────────────
+// ─── Initialize Services ────────────────────────────────────────────────────
 
-/**
- * AUTH: Check if a saved session exists.
- */
+function initializeServices(): void {
+  // Read any saved session BEFORE constructing the service so the TelegramClient
+  // is created with the right StringSession — ensuring connect() is called only once.
+  const savedForInit = readSessionFile()
+  telegramService = new TelegramService(API_ID, API_HASH, savedForInit?.session ?? '')
+  
+  // Listen to auth status changes and forward to renderer
+  telegramService.onStatusChange((state) => {
+    sendToRenderer('auth-status', state)
+    
+    // Initialize channel and download services when authenticated
+    if (state.status === 'authenticated') {
+      const client = telegramService.getClient()
+      channelService = new ChannelService(client)
+      downloadManager = new DownloadManager(client)
+      
+      // Setup download event listeners
+      downloadManager.onEvent((event) => {
+        switch (event.type) {
+          case 'start':
+            sendToRenderer('download:total', { total: event.data.total })
+            break
+          case 'fileStart':
+            sendToRenderer('download:fileStart', event.data)
+            break
+          case 'fileProgress':
+            sendToRenderer('download:fileProgress', event.data)
+            break
+          case 'fileComplete':
+            sendToRenderer('download:fileComplete', event.data)
+            break
+          case 'fileError':
+            sendToRenderer('download:fileError', event.data)
+            break
+          case 'complete':
+            sendToRenderer('download:complete', event.data)
+            break
+          case 'error':
+            sendToRenderer('download:error', event.data)
+            break
+          case 'progress':
+            sendToRenderer('download:status', event.data)
+            break
+        }
+      })
+    } else if (state.status === 'idle') {
+      // Clear services on logout
+      channelService = null
+      downloadManager = null
+    }
+  })
+}
+
+// ─── IPC Handlers: Auth ─────────────────────────────────────────────────────
+
+ipcMain.handle('auth:getStatus', () => {
+  return telegramService.getAuthState()
+})
+
 ipcMain.handle('auth:hasSession', (): boolean => {
   return readSessionFile() !== null
 })
 
-/**
- * AUTH: Restore a previously saved session (auto-connect).
- */
-ipcMain.handle('auth:restoreSession', async (): Promise<{ success: boolean; error?: string }> => {
+ipcMain.handle('auth:restoreSession', async () => {
   const saved = readSessionFile()
-  if (!saved) return { success: false, error: 'No saved session.' }
+  if (!saved) {
+    return { success: false, error: 'No saved session.' }
+  }
 
   try {
-    const stringSession = new StringSession(saved.session)
-    const client = new TelegramClient(stringSession, saved.apiId, saved.apiHash, {
-      connectionRetries: 3,
+    const success = await telegramService.restoreSession(saved)
+    return { success }
+  } catch (err) {
+    deleteSessionFile()
+    const error = err instanceof Error ? err.message : String(err)
+    return { success: false, error }
+  }
+})
+
+ipcMain.handle('auth:connect', async () => {
+  try {
+    await telegramService.startPhoneLogin()
+    
+    // Wait for authentication
+    return new Promise((resolve) => {
+      const checkAuth = () => {
+        const state = telegramService.getAuthState()
+        if (state.status === 'authenticated') {
+          // Save session
+          const sessionString = telegramService.getSessionString()
+          writeSessionFile({
+            session: sessionString,
+            phoneNumber: state.phoneNumber,
+          })
+          resolve({ success: true })
+        } else if (state.status === 'error') {
+          resolve({ success: false, error: state.error })
+        } else {
+          setTimeout(checkAuth, 1000)
+        }
+      }
+      checkAuth()
     })
-    await client.connect()
-    activeClient = client
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    return { success: false, error }
+  }
+})
+
+ipcMain.handle('auth:connectWithQR', async () => {
+  try {
+    await telegramService.startQRLogin()
+    
+    // Wait for authentication or error
+    return new Promise((resolve) => {
+      const checkAuth = () => {
+        const state = telegramService.getAuthState()
+        if (state.status === 'authenticated') {
+          // Save session
+          const sessionString = telegramService.getSessionString()
+          writeSessionFile({
+            session: sessionString,
+            phoneNumber: state.phoneNumber,
+          })
+          resolve({ success: true })
+        } else if (state.status === 'error' || state.status === 'expired') {
+          resolve({ success: false, error: state.error })
+        } else {
+          setTimeout(checkAuth, 1000)
+        }
+      }
+      checkAuth()
+    })
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    return { success: false, error }
+  }
+})
+
+ipcMain.handle('auth:submitPhone', (_event, phone: string) => {
+  telegramService.submitPhone(phone)
+})
+
+ipcMain.handle('auth:submitCode', (_event, code: string) => {
+  telegramService.submitCode(code)
+})
+
+ipcMain.handle('auth:submitPassword', (_event, password: string) => {
+  telegramService.submitPassword(password)
+})
+
+ipcMain.handle('auth:logout', async () => {
+  await telegramService.logout()
+  deleteSessionFile()
+})
+
+// ─── IPC Handlers: Channels ─────────────────────────────────────────────────
+
+ipcMain.handle('channels:getJoined', async () => {
+  if (!channelService) {
+    throw new Error('Not authenticated')
+  }
+  return await channelService.getJoinedChannels()
+})
+
+ipcMain.handle('channels:getMedia', async (_event, channelId: string | number, options?: any) => {
+  if (!channelService) {
+    throw new Error('Not authenticated')
+  }
+  const batch = await channelService.getChannelMedia(channelId, options)
+  
+  // Convert dates to ISO strings for serialization
+  return {
+    ...batch,
+    items: batch.items.map(item => ({
+      ...item,
+      date: item.date.toISOString(),
+    })),
+  }
+})
+
+ipcMain.handle('channels:searchMedia', async (_event, channelId: string | number, query: string, limit?: number) => {
+  if (!channelService) {
+    throw new Error('Not authenticated')
+  }
+  const items = await channelService.searchMedia(channelId, query, limit)
+  
+  // Convert dates to ISO strings
+  return items.map(item => ({
+    ...item,
+    date: item.date.toISOString(),
+  }))
+})
+
+// ─── IPC Handlers: Download ─────────────────────────────────────────────────
+
+ipcMain.handle('download:downloadSingle', async (_event, channelId: string | number, messageId: number, downloadPath: string) => {
+  if (!downloadManager) {
+    return { success: false, error: 'Not authenticated' }
+  }
+  
+  try {
+    return await downloadManager.downloadSingle(channelId, messageId, downloadPath)
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    return { success: false, error }
+  }
+})
+
+ipcMain.handle('download:downloadMultiple', async (_event, params: {
+  channelId: string | number
+  messageIds: number[]
+  downloadPath: string
+}) => {
+  if (!downloadManager) {
+    return { success: false, error: 'Not authenticated' }
+  }
+  
+  try {
+    const stats = await downloadManager.downloadMultiple(params)
+    return { success: true, stats }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    return { success: false, error }
+  }
+})
+
+ipcMain.handle('download:cancel', async () => {
+  if (downloadManager) {
+    downloadManager.cancel()
+  }
+})
+
+// Keep legacy download:start for backward compatibility
+ipcMain.handle('download:start', async (_event, { channelId, downloadPath }: { channelId: string; downloadPath: string }) => {
+  if (!downloadManager || !channelService) {
+    return { success: false, error: 'Not authenticated' }
+  }
+  
+  try {
+    sendToRenderer('download:status', { status: 'running', message: 'Fetching channel media...' })
+    
+    // Fetch all media from channel
+    const batch = await channelService.getChannelMedia(channelId, { limit: 1000 })
+    const messageIds = batch.items.map(item => item.messageId)
+    
+    if (messageIds.length === 0) {
+      return { success: false, error: 'No media found in channel' }
+    }
+    
+    // Download all
+    const stats = await downloadManager.downloadMultiple({
+      channelId,
+      messageIds,
+      downloadPath,
+      concurrency: 5,
+    })
+    
+    // Add to history
+    appendHistory({
+      id: `dl-${Date.now()}`,
+      channelId: String(channelId),
+      downloadPath,
+      totalFiles: stats.total,
+      downloadedFiles: stats.completed,
+      status: stats.failed === 0 ? 'completed' : stats.completed > 0 ? 'partial' : 'error',
+      startedAt: new Date(stats.startTime).toISOString(),
+      completedAt: new Date(stats.endTime || Date.now()).toISOString(),
+    })
+    
     return { success: true }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
@@ -203,81 +438,9 @@ ipcMain.handle('auth:restoreSession', async (): Promise<{ success: boolean; erro
   }
 })
 
-/**
- * AUTH: Connect with new credentials (does NOT require phone – uses bot/session auth flow).
- * For real phone auth you'd add a two-step flow via IPC – here we connect and save session.
- */
-ipcMain.handle(
-  'auth:connect',
-  async (
-    _event,
-    { apiId, apiHash }: { apiId: string; apiHash: string }
-  ): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const numericApiId = parseInt(apiId, 10)
-      if (isNaN(numericApiId)) throw new Error('API ID must be a number.')
+// ─── IPC Handlers: Other ────────────────────────────────────────────────────
 
-      const stringSession = new StringSession('')
-      const client = new TelegramClient(stringSession, numericApiId, apiHash, {
-        connectionRetries: 3,
-      })
-
-      await client.start({
-        phoneNumber: async () => {
-          return new Promise<string>((resolve) => {
-            sendProgress('auth:requestPhone', {})
-            ipcMain.once('auth:phoneResponse', (_e, phone: string) => resolve(phone))
-          })
-        },
-        password: async () => {
-          return new Promise<string>((resolve) => {
-            sendProgress('auth:requestPassword', {})
-            ipcMain.once('auth:passwordResponse', (_e, pwd: string) => resolve(pwd))
-          })
-        },
-        phoneCode: async () => {
-          return new Promise<string>((resolve) => {
-            sendProgress('auth:requestCode', {})
-            ipcMain.once('auth:codeResponse', (_e, code: string) => resolve(code))
-          })
-        },
-        onError: (err: Error) => {
-          sendProgress('auth:error', { message: err.message })
-        },
-      })
-
-      const sessionString = client.session.save() as unknown as string
-      writeSessionFile({ apiId: numericApiId, apiHash, session: sessionString })
-      activeClient = client
-      return { success: true }
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err)
-      return { success: false, error }
-    }
-  }
-)
-
-/**
- * AUTH: Logout – disconnect and remove saved session.
- */
-ipcMain.handle('auth:logout', async (): Promise<void> => {
-  if (activeClient) {
-    try {
-      await activeClient.disconnect()
-    } catch {
-      // ignore disconnect errors
-    }
-    activeClient = null
-  }
-  if (fs.existsSync(SESSION_FILE)) {
-    fs.unlinkSync(SESSION_FILE)
-  }
-})
-
-/**
- * DIALOG: Open native folder picker.
- */
-ipcMain.handle('dialog:openFolder', async (): Promise<string | null> => {
+ipcMain.handle('dialog:openFolder', async () => {
   const win = getBrowserWindow()
   if (!win) return null
 
@@ -291,253 +454,20 @@ ipcMain.handle('dialog:openFolder', async (): Promise<string | null> => {
   return result.filePaths[0]
 })
 
-/**
- * DOWNLOAD: Start downloading videos from a Telegram channel.
- * Emits real-time progress events to the renderer.
- */
-ipcMain.handle(
-  'download:start',
-  async (
-    _event,
-    { channelId, downloadPath }: { channelId: string; downloadPath: string }
-  ): Promise<{ success: boolean; error?: string }> => {
-    if (isDownloading) {
-      return { success: false, error: 'A download is already in progress.' }
-    }
-
-    if (!activeClient) {
-      return { success: false, error: 'Not authenticated. Please connect first.' }
-    }
-
-    isDownloading = true
-    const startedAt = new Date().toISOString()
-    let totalFiles = 0
-    let downloadedFiles = 0
-    let totalDownloadedBytes = 0
-    let errorCount = 0
-    const historyId = `dl-${Date.now()}`
-
-    sendProgress('download:status', { status: 'running', message: 'Fetching channel info…' })
-
-    try {
-      console.log("Channel ID received:", channelId)
-      const targetChannel = normalizeChannel(channelId)
-
-      // Resolve the entity
-      const entity = await activeClient.getEntity(targetChannel)
-      console.log("Resolved entity:", entity.id)
-
-      // Iterate all messages to find video messages
-      sendProgress('download:status', { status: 'running', message: 'Scanning messages for media…' })
-
-      const videoMessages: Api.Message[] = []
-
-      for await (const message of activeClient.iterMessages(entity, { limit: undefined })) {
-        const msg = message as Api.Message
-        if (msg.media) {
-          const media = msg.media
-          // Check for document (video) or photo
-          const isVideo =
-            'className' in media &&
-            (media.className === 'MessageMediaDocument' || media.className === 'MessageMediaPhoto')
-
-          if (isVideo) {
-            videoMessages.push(msg)
-          }
-        }
-      }
-
-      totalFiles = videoMessages.length
-      sendProgress('download:total', { total: totalFiles })
-      sendProgress('download:status', {
-        status: 'running',
-        message: `Found ${totalFiles} media files. Starting download…`,
-      })
-
-      // Ensure output directory exists
-      fs.mkdirSync(downloadPath, { recursive: true })
-
-      // Download with concurrency limit of 5 to optimize Telegram
-      const CONCURRENCY = 5
-      const queue = [...videoMessages]
-
-      async function worker(q: Api.Message[]): Promise<void> {
-        while (q.length) {
-          if (!isDownloading) break // Exit if cancelled
-
-          const msg = q.shift()
-          if (!msg) break
-
-          const msgId = msg.id
-
-          let fileName = `file_${msgId}`
-          if (
-            msg.media &&
-            'document' in msg.media &&
-            msg.media.document &&
-            'attributes' in msg.media.document
-          ) {
-            const doc = msg.media.document as Api.Document
-            const attr = doc.attributes.find((a) => a.className === 'DocumentAttributeFilename') as
-              | Api.DocumentAttributeFilename
-              | undefined
-            if (attr?.fileName) {
-              fileName = attr.fileName
-            } else {
-              const mimeAttr = doc.mimeType ?? 'video/mp4'
-              const ext = mimeAttr.split('/')[1] ?? 'bin'
-              fileName = `media_${msgId}.${ext}`
-            }
-          } else {
-            fileName = `photo_${msgId}.jpg`
-          }
-
-          const filePath = path.join(downloadPath, fileName)
-          sendProgress('download:fileStart', { fileName, fileIndex: downloadedFiles + 1, total: totalFiles })
-
-          let success = false
-          let retryCount = 0
-
-          while (!success && retryCount < 5 && isDownloading) {
-            try {
-              const buffer = (await activeClient!.downloadMedia(msg, {
-                progressCallback: (downloaded: unknown, total: unknown) => {
-                  const dl = Number(downloaded)
-                  const tot = Number(total)
-                  const pct = tot > 0 ? Math.round((dl / tot) * 100) : 0
-                  sendProgress('download:fileProgress', { fileName, percent: pct, downloadedBytes: dl, totalBytes: tot })
-                },
-              })) as Buffer | undefined
-
-              if (buffer) {
-                fs.writeFileSync(filePath, buffer)
-            totalDownloadedBytes += buffer.length
-            totalDownloadedBytes += buffer.length
-              }
-              success = true
-
-              downloadedFiles++
-              sendProgress('download:fileComplete', {
-                fileName,
-                downloaded: downloadedFiles,
-                total: totalFiles,
-        totalDownloadedBytes,
-                percent: Math.round((downloadedFiles / totalFiles) * 100),
-              })
-            } catch (fileErr) {
-              if (fileErr instanceof errors.FloodWaitError) {
-                const waitSeconds = fileErr.seconds
-                console.warn(`Flood wait! Sleeping for ${waitSeconds} seconds...`)
-                sendProgress('download:status', { status: 'running', message: `Telegram rate limit. Waiting ${waitSeconds}s...` })
-                await new Promise((r) => setTimeout(r, waitSeconds * 1000 + 100))
-                retryCount++
-              } else {
-                errorCount++
-                const errMsg = fileErr instanceof Error ? fileErr.message : String(fileErr)
-                sendProgress('download:fileError', { fileName, error: errMsg })
-                break // Unrecoverable error, move to next file
-              }
-            }
-          }
-
-          if (!success && retryCount >= 5) {
-            errorCount++
-            sendProgress('download:fileError', { fileName, error: 'Too many flood wait errors. Giving up on file.' })
-          }
-        }
-      }
-
-      // Launch concurrent workers
-      const workers = Array.from({ length: Math.min(CONCURRENCY, totalFiles) }, () => worker(queue))
-      await Promise.all(workers)
-
-      const status: HistoryEntry['status'] =
-        errorCount === 0 ? 'completed' : downloadedFiles > 0 ? 'partial' : 'error'
-
-      const completedAt = new Date().toISOString()
-
-      appendHistory({
-        id: historyId,
-        channelId,
-        downloadPath,
-        totalFiles,
-        downloadedFiles,
-        status,
-        startedAt,
-        completedAt,
-      })
-
-      const durationMs = new Date(completedAt).getTime() - new Date(startedAt).getTime()
-      const averageSpeed = durationMs > 0 ? (totalDownloadedBytes / (durationMs / 1000)) : 0
-
-      sendProgress('download:complete', {
-        downloaded: downloadedFiles,
-        total: totalFiles,
-        errors: errorCount,
-        status,
-        totalSize: totalDownloadedBytes,
-        durationMs,
-        averageSpeed
-      })
-
-      isDownloading = false
-      return { success: true }
-    } catch (err) {
-      isDownloading = false
-      const error = err instanceof Error ? err.message : String(err)
-
-      appendHistory({
-        id: historyId,
-        channelId,
-        downloadPath,
-        totalFiles,
-        downloadedFiles,
-        status: 'error',
-        startedAt,
-        completedAt: new Date().toISOString(),
-        errorMessage: error,
-      })
-
-      sendProgress('download:error', { error })
-      return { success: false, error }
-    }
-  }
-)
-
-/**
- * DOWNLOAD: Cancel an in-progress download.
- */
-ipcMain.handle('download:cancel', async (): Promise<void> => {
-  isDownloading = false
-  sendProgress('download:status', { status: 'cancelled', message: 'Download cancelled by user.' })
-})
-
-/**
- * HISTORY: Return all download history entries.
- */
 ipcMain.handle('history:get', (): HistoryEntry[] => {
   return readHistory()
 })
 
-/**
- * HISTORY: Clear all download history.
- */
 ipcMain.handle('history:clear', (): void => {
   if (fs.existsSync(HISTORY_FILE)) {
     fs.unlinkSync(HISTORY_FILE)
   }
 })
 
-/**
- * SHELL: Open a URL in the default browser.
- */
 ipcMain.handle('shell:openExternal', (_event, url: string): void => {
   shell.openExternal(url)
 })
 
-/**
- * THEME: Toggle native theme.
- */
 ipcMain.handle('theme:get', (): 'dark' | 'light' => {
   return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
 })
@@ -546,19 +476,35 @@ ipcMain.handle('theme:set', (_event, theme: 'dark' | 'light'): void => {
   nativeTheme.themeSource = theme
 })
 
-/**
- * APP: Get userData path (for display in settings).
- */
 ipcMain.handle('app:getDataPath', (): string => USER_DATA)
 
-/**
- * APP: Get current app version.
- */
 ipcMain.handle('app:getVersion', (): string => app.getVersion())
+
+ipcMain.handle('window:minimize', (): void => {
+  const win = getBrowserWindow()
+  if (win) win.minimize()
+})
+
+ipcMain.handle('window:maximize', (): void => {
+  const win = getBrowserWindow()
+  if (win) {
+    if (win.isMaximized()) {
+      win.unmaximize()
+    } else {
+      win.maximize()
+    }
+  }
+})
+
+ipcMain.handle('window:close', (): void => {
+  const win = getBrowserWindow()
+  if (win) win.close()
+})
 
 // ─── App Lifecycle ──────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
+  initializeServices()
   createWindow()
 
   app.on('activate', () => {
@@ -573,16 +519,11 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', async () => {
-  if (activeClient) {
-    try {
-      await activeClient.disconnect()
-    } catch {
-      // ignore
-    }
+  if (telegramService) {
+    await telegramService.disconnect()
   }
 })
 
-// Prevent navigation to external URLs
 app.on('web-contents-created', (_event, contents) => {
   contents.on('will-navigate', (event, url) => {
     if (!url.startsWith('http://localhost') && !url.startsWith('file://')) {

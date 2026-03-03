@@ -20,6 +20,9 @@ export default defineConfig({
             },
           },
         },
+        onstart(options) {
+          options.reload()
+        },
       },
       {
         // Preload script
@@ -31,9 +34,6 @@ export default defineConfig({
               external: ['electron'],
             },
           },
-        },
-        onstart(options) {
-          options.reload()
         },
       },
     ]),

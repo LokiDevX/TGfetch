@@ -15,6 +15,26 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 export type DownloadStatus = 'idle' | 'running' | 'completed' | 'error' | 'cancelled' | 'partial'
 
+export type AuthStatus = 
+  | 'idle'
+  | 'restoring'
+  | 'connecting'
+  | 'qr_waiting'
+  | 'qr_scanned'
+  | 'waiting_for_phone'
+  | 'waiting_for_code'
+  | 'waiting_for_password'
+  | 'authenticated'
+  | 'expired'
+  | 'error'
+
+export interface AuthStatusPayload {
+  status: AuthStatus
+  error?: string
+  phoneNumber?: string
+  qrCode?: string
+}
+
 export interface ProgressPayload {
   status?: DownloadStatus
   message?: string
@@ -70,29 +90,95 @@ function on(channel: string, callback: (...args: unknown[]) => void): () => void
 const tgfetchAPI = {
   // ── Auth ────────────────────────────────────────────────────────────────
   auth: {
+    /**
+     * Get current authentication status
+     */
+    getStatus: () => invoke<AuthStatusPayload>('auth:getStatus'),
+    
+    /**
+     * Check if a saved session exists
+     */
     hasSession: () => invoke<boolean>('auth:hasSession'),
+    
+    /**
+     * Restore a previously saved session (auto-login)
+     */
     restoreSession: () => invoke<{ success: boolean; error?: string }>('auth:restoreSession'),
-    connect: (credentials: { apiId: string; apiHash: string }) =>
-      invoke<{ success: boolean; error?: string }>('auth:connect', credentials),
+    
+    /**
+     * Initiate new Telegram connection (starts interactive login flow)
+     */
+    connect: () => invoke<{ success: boolean; error?: string }>('auth:connect'),
+    
+    /**
+     * Connect with QR code
+     */
+    connectWithQR: () => invoke<{ success: boolean; error?: string }>('auth:connectWithQR'),
+    
+    /**
+     * Submit phone number during authentication
+     */
+    submitPhone: (phone: string) => invoke<void>('auth:submitPhone', phone),
+    
+    /**
+     * Submit verification code during authentication
+     */
+    submitCode: (code: string) => invoke<void>('auth:submitCode', code),
+    
+    /**
+     * Submit 2FA password during authentication
+     */
+    submitPassword: (password: string) => invoke<void>('auth:submitPassword', password),
+    
+    /**
+     * Logout and clear session
+     */
     logout: () => invoke<void>('auth:logout'),
 
-    // Phone/code/password responses sent back to main for interactive login
-    respondPhone: (phone: string) => ipcRenderer.send('auth:phoneResponse', phone),
-    respondCode: (code: string) => ipcRenderer.send('auth:codeResponse', code),
-    respondPassword: (pwd: string) => ipcRenderer.send('auth:passwordResponse', pwd),
+    /**
+     * Listen for auth status updates from main process
+     */
+    onStatusChange: (cb: (payload: AuthStatusPayload) => void) =>
+      on('auth-status', cb as (...args: unknown[]) => void),
+  },
 
-    // Listeners for main requesting input
-    onRequestPhone: (cb: () => void) => on('auth:requestPhone', cb),
-    onRequestCode: (cb: () => void) => on('auth:requestCode', cb),
-    onRequestPassword: (cb: () => void) => on('auth:requestPassword', cb),
-    onError: (cb: (payload: { message: string }) => void) =>
-      on('auth:error', cb as (...args: unknown[]) => void),
+  // ── Channels ─────────────────────────────────────────────────────────────
+  channels: {
+    /**
+     * Get all joined channels
+     */
+    getJoined: () => invoke<any[]>('channels:getJoined'),
+    
+    /**
+     * Get media from a channel
+     */
+    getMedia: (channelId: string | number, options?: any) =>
+      invoke<any>('channels:getMedia', channelId, options),
+    
+    /**
+     * Search media in a channel
+     */
+    searchMedia: (channelId: string | number, query: string, limit?: number) =>
+      invoke<any[]>('channels:searchMedia', channelId, query, limit),
   },
 
   // ── Download ─────────────────────────────────────────────────────────────
   download: {
     start: (params: { channelId: string; downloadPath: string }) =>
       invoke<{ success: boolean; error?: string }>('download:start', params),
+    
+    /**
+     * Download a single file
+     */
+    downloadSingle: (channelId: string | number, messageId: number, downloadPath: string) =>
+      invoke<{ success: boolean; error?: string; filePath?: string }>('download:downloadSingle', channelId, messageId, downloadPath),
+    
+    /**
+     * Download multiple files
+     */
+    downloadMultiple: (params: { channelId: string | number; messageIds: number[]; downloadPath: string }) =>
+      invoke<{ success: boolean; error?: string }>('download:downloadMultiple', params),
+    
     cancel: () => invoke<void>('download:cancel'),
 
     // Progress event listeners – each returns a cleanup/unsubscribe function
@@ -141,6 +227,13 @@ const tgfetchAPI = {
     getDataPath: () => invoke<string>('app:getDataPath'),
     getVersion: () => invoke<string>('app:getVersion'),
   },
+
+  // ── Window Controls ──────────────────────────────────────────────────────
+  window: {
+    minimize: () => invoke<void>('window:minimize'),
+    maximize: () => invoke<void>('window:maximize'),
+    close: () => invoke<void>('window:close'),
+  }
 }
 
 contextBridge.exposeInMainWorld('tgfetch', tgfetchAPI)

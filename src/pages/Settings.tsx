@@ -131,7 +131,18 @@ export function Settings(): JSX.Element {
         <div className="py-3 border-b border-white/5">
           <p className="text-xs font-bold text-white/40 uppercase tracking-widest flex items-center gap-1.5">
             <Info className="w-3 h-3" />
-            About
+            About TGfetch
+          </p>
+        </div>
+
+        {/* About description */}
+        <div className="py-4 border-b border-white/5">
+          <p className="text-sm text-white/70 leading-relaxed">
+            TGfetch is a modern Telegram media manager built and designed by{' '}
+            <span className="text-blue-400 font-semibold">Loki</span>.
+          </p>
+          <p className="text-xs text-white/40 mt-2">
+            Built with Electron, React, TypeScript, and Telegram MTProto for seamless media downloads and management.
           </p>
         </div>
 
@@ -156,7 +167,7 @@ export function Settings(): JSX.Element {
         <SettingsRow
           icon={<Github className="w-4 h-4" />}
           title="GitHub"
-          description="View source code"
+          description="View source code & contribute"
         >
           <motion.button
             whileHover={{ scale: 1.04 }}

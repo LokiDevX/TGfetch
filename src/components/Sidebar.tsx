@@ -14,6 +14,7 @@ import {
   ChevronRight,
   LogOut,
   LogIn,
+  Radio,
 } from 'lucide-react'
 import { useDownloadStore } from '../store/downloadStore'
 import type { AppPage } from '../store/downloadStore'
@@ -26,6 +27,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+  { id: 'channels', label: 'My Channels', icon: <Radio className="w-4 h-4" /> },
   { id: 'history', label: 'History', icon: <History className="w-4 h-4" /> },
   { id: 'settings', label: 'Settings', icon: <Settings className="w-4 h-4" /> },
 ]
@@ -42,8 +44,9 @@ export function Sidebar(): JSX.Element {
 
   async function handleLogout(): Promise<void> {
     await window.tgfetch.auth.logout()
-    setAuth({ isAuthenticated: false })
   }
+
+  const isAuthenticated = auth.status === 'authenticated'
 
   return (
     <motion.nav
@@ -120,7 +123,7 @@ export function Sidebar(): JSX.Element {
 
       {/* ── Auth button ─────────────────────────────────────────────────── */}
       <div className="px-2 mb-2">
-        {auth.isAuthenticated ? (
+        {isAuthenticated ? (
           <motion.button
             whileHover={{ x: 2 }}
             whileTap={{ scale: 0.97 }}
@@ -164,6 +167,21 @@ export function Sidebar(): JSX.Element {
 
       {/* ── Collapse toggle ──────────────────────────────────────────────── */}
       <div className="px-2 pt-2 border-t border-white/10">
+        {/* Footer brand strip */}
+        <AnimatePresence>
+          {!sidebarCollapsed && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-3 text-xs text-white/40"
+            >
+              <p className="font-medium">© 2026 Loki</p>
+              <p className="text-white/25 mt-0.5">Built with Electron & Telegram MTProto</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}

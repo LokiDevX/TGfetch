@@ -11,7 +11,7 @@
  * no react-router needed for this single-window desktop app.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { Toaster } from 'react-hot-toast'
 
@@ -19,23 +19,38 @@ import { Navbar } from './components/Navbar'
 import { Sidebar } from './components/Sidebar'
 import { ActivityLog } from './components/ActivityLog'
 import { AuthDialog } from './components/AuthDialog'
+import { SplashScreen } from './components/SplashScreen'
 
 import { Dashboard } from './pages/Dashboard'
 import { History } from './pages/History'
 import { Settings } from './pages/Settings'
+import { Channels } from './pages/Channels'
+import { Media } from './pages/Media'
 
 import { useDownloadStore } from './store/downloadStore'
 
 export function App(): JSX.Element {
   const { activePage, theme } = useDownloadStore()
+  const [showSplash, setShowSplash] = useState(true)
 
   // Sync Tailwind dark class with persisted theme on startup
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
 
+  // Hide splash screen after 1.2 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false)
+    }, 1200)
+    return () => clearTimeout(timer)
+  }, [])
+
   return (
     <div className="flex flex-col h-screen bg-background text-white overflow-hidden font-sans">
+      {/* ── Splash Screen ───────────────────────────────────────────────── */}
+      <SplashScreen isVisible={showSplash} />
+
       {/* ── Top navigation ─────────────────────────────────────────────── */}
       <Navbar />
 
@@ -50,6 +65,8 @@ export function App(): JSX.Element {
             {activePage === 'dashboard' && <Dashboard key="dashboard" />}
             {activePage === 'history' && <History key="history" />}
             {activePage === 'settings' && <Settings key="settings" />}
+            {activePage === 'channels' && <Channels key="channels" />}
+            {activePage === 'media' && <Media key="media" />}
           </AnimatePresence>
         </main>
 

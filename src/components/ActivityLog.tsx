@@ -86,7 +86,7 @@ export function ActivityLog(): JSX.Element {
       initial={false}
       animate={{ width: activityLogOpen ? 320 : 40 }}
       transition={{ duration: 0.25, ease: 'easeInOut' }}
-      className="flex flex-col border-l border-white/10 bg-background-card shrink-0 overflow-hidden"
+      className="flex flex-col border-l border-white/5 bg-white/[0.02] backdrop-blur-xl shrink-0 overflow-hidden shadow-[inset_0_0_20px_rgba(0,0,0,0.3)]"
     >
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-white/10">

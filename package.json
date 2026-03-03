@@ -21,8 +21,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@types/qrcode": "^1.5.6",
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.344.0",
+    "qrcode": "^1.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.1",
@@ -51,16 +53,24 @@
   },
   "build": {
     "appId": "com.loki.tgfetch",
-    "productName": "TGfetch",
+    "productName": "TGfetch by Loki",
+    "copyright": "© 2026 Loki",
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
     ],
     "win": {
-      "target": [
-        "nsis"
-      ],
+      "target": "nsis",
       "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "TGfetch-by-Loki-Setup-${version}.exe"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility"
     }
   }
 }

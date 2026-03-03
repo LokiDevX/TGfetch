@@ -20,19 +20,19 @@ import { motion } from 'framer-motion'
 import {
   Download,
   Plug,
-  Eye,
-  EyeOff,
   StopCircle,
   Wifi,
   WifiOff,
+  Radio,
+  TrendingUp,
+  Clock,
+  Folder,
+  ArrowRight,
+  QrCode,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import { useDownloadStore } from '../store/downloadStore'
-import { InputField } from '../components/InputField'
-import { FolderSelector } from '../components/FolderSelector'
-import { ProgressBar } from '../components/ProgressBar'
-import { DownloadSummary } from '../components/DownloadSummary'
 import type { DownloadStatus } from '../types/global'
 
 // ─── useDownloadManager hook ─────────────────────────────────────────────────
@@ -48,7 +48,8 @@ function useDownloadManager() {
     addLog,
     auth,
     setAuth,
-    setShowAuthDialog,
+    setAuthView,
+    setAuthModalOpen,
     setActivityLogOpen,
   } = useDownloadStore()
 
@@ -59,37 +60,35 @@ function useDownloadManager() {
       if (has) {
         const result = await window.tgfetch.auth.restoreSession()
         if (result.success) {
-          setAuth({ isAuthenticated: true })
+          const status = await window.tgfetch.auth.getStatus()
+          setAuth(status)
           addLog({ type: 'success', message: 'Session restored – ready to download.' })
         }
+      } else {
+        const status = await window.tgfetch.auth.getStatus()
+        setAuth(status)
       }
     }
     tryRestore()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Register IPC auth listeners ───────────────────────────────────────────
+  // ── Register auth status listener ─────────────────────────────────────────
   useEffect(() => {
-    const unsubPhone = window.tgfetch.auth.onRequestPhone(() => {
-      setAuth({ pendingAction: 'phone' })
-      setShowAuthDialog(true)
+    const unsubAuth = window.tgfetch.auth.onStatusChange((payload) => {
+      setAuth(payload)
+      
+      // Log status changes
+      if (payload.status === 'authenticated') {
+        addLog({ type: 'success', message: `Connected to Telegram${payload.phoneNumber ? ' as ' + payload.phoneNumber : ''}` })
+        toast.success('Successfully connected to Telegram!')
+      } else if (payload.status === 'error' && payload.error) {
+        addLog({ type: 'error', message: `Auth error: ${payload.error}` })
+        toast.error(`Authentication error: ${payload.error}`)
+      }
     })
-    const unsubCode = window.tgfetch.auth.onRequestCode(() => {
-      setAuth({ pendingAction: 'code' })
-      setShowAuthDialog(true)
-    })
-    const unsubPwd = window.tgfetch.auth.onRequestPassword(() => {
-      setAuth({ pendingAction: 'password' })
-      setShowAuthDialog(true)
-    })
-    const unsubAuthErr = window.tgfetch.auth.onError(({ message }) => {
-      addLog({ type: 'error', message: `Auth error: ${message}` })
-      toast.error(`Authentication error: ${message}`)
-    })
+    
     return () => {
-      unsubPhone()
-      unsubCode()
-      unsubPwd()
-      unsubAuthErr()
+      unsubAuth()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -197,29 +196,42 @@ function useDownloadManager() {
 
   // ── Connect ───────────────────────────────────────────────────────────────
   const handleConnect = useCallback(async () => {
-    if (!credentials.apiId || !credentials.apiHash) {
-      toast.error('API ID and API Hash are required.')
-      return
+    addLog({ type: 'info', message: 'Initiating Telegram connection…' })
+
+    const result = await window.tgfetch.auth.connect()
+
+    if (!result.success && result.error) {
+      toast.error(result.error)
+      addLog({ type: 'error', message: result.error })
+    }
+  }, [addLog])
+
+  // ── Connect with QR ───────────────────────────────────────────────────────
+  const handleConnectQR = useCallback(async () => {
+    addLog({ type: 'info', message: 'Initiating QR login…' })
+
+    // Show QR view in modal first
+    try {
+      setAuthView('qr')
+      setAuthModalOpen(true)
+    } catch {
+      // ignore if store not ready
     }
 
-    setAuth({ isConnecting: true })
-    addLog({ type: 'info', message: 'Connecting to Telegram…' })
+    const result = await window.tgfetch.auth.connectWithQR()
 
-    const result = await window.tgfetch.auth.connect({
-      apiId: credentials.apiId,
-      apiHash: credentials.apiHash,
-    })
-
-    if (result.success) {
-      setAuth({ isAuthenticated: true, isConnecting: false })
-      toast.success('Connected to Telegram!')
-      addLog({ type: 'success', message: 'Connected to Telegram successfully.' })
-    } else {
-      setAuth({ isConnecting: false })
-      toast.error(result.error ?? 'Connection failed.')
-      addLog({ type: 'error', message: result.error ?? 'Connection failed.' })
+    if (!result.success && result.error) {
+      toast.error(result.error)
+      addLog({ type: 'error', message: result.error })
     }
-  }, [credentials.apiId, credentials.apiHash]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [addLog])
+
+  // ── Logout ────────────────────────────────────────────────────────────────
+  const handleLogout = useCallback(async () => {
+    await window.tgfetch.auth.logout()
+    toast.success('Logged out successfully')
+    addLog({ type: 'info', message: 'Logged out from Telegram' })
+  }, [addLog])
 
   // ── Start download ────────────────────────────────────────────────────────
   const handleStartDownload = useCallback(async () => {
@@ -254,25 +266,44 @@ function useDownloadManager() {
     addLog({ type: 'warning', message: 'Download cancelled by user.' })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { handleConnect, handleStartDownload, handleCancelDownload, auth, progress, credentials, setCredentials }
+  return { 
+    handleConnect,
+    handleConnectQR,
+    handleLogout, 
+    handleStartDownload, 
+    handleCancelDownload, 
+    auth, 
+    progress, 
+    credentials, 
+    setCredentials 
+  }
 }
 
 // ─── Dashboard Page ──────────────────────────────────────────────────────────
 
 export function Dashboard(): JSX.Element {
-  const [showApiHash, setShowApiHash] = useState(false)
   const {
     handleConnect,
-    handleStartDownload,
-    handleCancelDownload,
+    handleConnectQR,
+    handleLogout,
     auth,
     progress,
-    credentials,
-    setCredentials,
   } = useDownloadManager()
 
-  const isRunning = progress.status === 'running'
-  const canDownload = auth.isAuthenticated && !isRunning
+  const { setActivePage, history, channels } = useDownloadStore()
+
+  const isAuthenticated = auth.status === 'authenticated'
+  const isConnecting = auth.status === 'connecting' || 
+                       auth.status === 'restoring' ||
+                       auth.status === 'qr_waiting' ||
+                       auth.status === 'waiting_for_phone' ||
+                       auth.status === 'waiting_for_code' ||
+                       auth.status === 'waiting_for_password'
+
+  // Calculate stats
+  const totalChannels = channels.length
+  const recentDownloads = history.filter(h => h.status === 'completed').slice(0, 3)
+  const lastDownload = recentDownloads[0]
 
   return (
     <motion.div
@@ -280,229 +311,262 @@ export function Dashboard(): JSX.Element {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.25 }}
-      className="flex-1 overflow-y-auto p-6 space-y-6 max-w-2xl mx-auto w-full"
+      className="flex-1 overflow-y-auto relative"
     >
-      {/* ── Hero header ──────────────────────────────────────────────── */}
-      <div>
-        <motion.h1
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="text-3xl font-extrabold text-white tracking-tight"
-        >
-          Download Telegram Channel Media
-        </motion.h1>
-        <motion.p
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="text-sm font-medium text-white/50 mt-1.5"
-        >
-          Securely fetch and store all videos from your channel
-        </motion.p>
-      </div>
-
-      {/* ── Connection status badge ────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.15 }}
-        className={`
-          inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border
-          ${auth.isAuthenticated
-            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-            : 'bg-white/5 border-white/10 text-white/40'
-          }
-        `}
-      >
-        {auth.isAuthenticated ? (
-          <><Wifi className="w-3 h-3" /> Connected to Telegram</>
-        ) : (
-          <><WifiOff className="w-3 h-3" /> Not connected</>
-        )}
-      </motion.div>
-
-      {/* ── Credentials card ─────────────────────────────────────────── */}
-      <motion.section
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.12 }}
-        className="bg-background-card border border-white/10 rounded-2xl p-5 space-y-4"
-      >
-        <div className="flex items-center gap-2 mb-1">
-          <h2 className="text-sm font-semibold text-white/80">API Credentials</h2>
-          <span className="text-[10px] text-white/30 bg-white/5 px-2 py-0.5 rounded-full">
-            From my.telegram.org
-          </span>
+      <div className="max-w-6xl mx-auto p-8 space-y-8">
+        {/* ── Hero header ──────────────────────────────────────────────── */}
+        <div>
+          <motion.h1
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05 }}
+            className="text-4xl font-extrabold text-white tracking-tight"
+          >
+            Your Telegram Media
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="text-base font-medium text-white/50 mt-2"
+          >
+            Browse channels, select media, and download with ease
+          </motion.p>
         </div>
 
-        {/* API ID */}
-        <InputField
-          label="API ID"
-          value={credentials.apiId}
-          onChange={(v) => setCredentials({ apiId: v })}
-          type="number"
-          disabled={auth.isAuthenticated || auth.isConnecting}
-          hint="Numeric API ID from Telegram developer portal"
-          autoComplete="off"
-        />
+        {/* ── Connection Card ──────────────────────────────────────────── */}
+        {!isAuthenticated && (
+          <motion.section
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.12 }}
+            className="bg-gradient-to-br from-accent-blue/10 to-accent-cyan/10 border border-accent-blue/30 rounded-2xl p-8"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <h2 className="text-2xl font-bold text-white mb-2">Connect to Telegram</h2>
+                <p className="text-white/60 text-sm mb-6">
+                  Scan a QR code or use your phone number to access your channels
+                </p>
 
-        {/* API Hash */}
-        <InputField
-          label="API Hash"
-          value={credentials.apiHash}
-          onChange={(v) => setCredentials({ apiHash: v })}
-          type={showApiHash ? 'text' : 'password'}
-          disabled={auth.isAuthenticated || auth.isConnecting}
-          hint="32-character hex string from Telegram developer portal"
-          autoComplete="off"
-          rightSlot={
+                <div className="flex items-center gap-3">
+                  <motion.button
+                    whileHover={!isConnecting ? { scale: 1.02 } : {}}
+                    whileTap={!isConnecting ? { scale: 0.98 } : {}}
+                    onClick={handleConnectQR}
+                    disabled={isConnecting}
+                    className={`
+                      px-6 py-3 rounded-xl flex items-center gap-2.5 text-sm font-semibold
+                      transition-all duration-200
+                      ${isConnecting
+                        ? 'bg-white/10 text-white/40 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-accent-blue to-accent-cyan text-white shadow-glow-blue hover:shadow-glow-cyan'
+                      }
+                    `}
+                  >
+                    {isConnecting && auth.status === 'qr_waiting' ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+                        Waiting for scan...
+                      </>
+                    ) : (
+                      <>
+                        <QrCode className="w-5 h-5" />
+                        Login with QR
+                      </>
+                    )}
+                  </motion.button>
+
+                  <motion.button
+                    whileHover={!isConnecting ? { scale: 1.02 } : {}}
+                    whileTap={!isConnecting ? { scale: 0.98 } : {}}
+                    onClick={handleConnect}
+                    disabled={isConnecting}
+                    className="px-6 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm font-semibold transition-all"
+                  >
+                    Use Phone Number
+                  </motion.button>
+                </div>
+              </div>
+              
+              <div className="hidden lg:block">
+                <div className="w-32 h-32 rounded-2xl bg-gradient-to-br from-accent-blue/20 to-accent-cyan/20 flex items-center justify-center">
+                  <Wifi className="w-16 h-16 text-accent-blue" />
+                </div>
+              </div>
+            </div>
+          </motion.section>
+        )}
+
+        {/* ── Stats Cards ─────────────────────────────────────────────── */}
+        {isAuthenticated && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.14 }}
+            className="grid grid-cols-1 md:grid-cols-3 gap-4"
+          >
+            {/* Total Channels */}
+            <div className="bg-background-card border border-white/10 rounded-2xl p-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-accent-blue/20 to-accent-cyan/20 flex items-center justify-center">
+                  <Radio className="w-6 h-6 text-accent-blue" />
+                </div>
+                <TrendingUp className="w-4 h-4 text-emerald-400" />
+              </div>
+              <p className="text-3xl font-bold text-white mb-1">{totalChannels}</p>
+              <p className="text-sm text-white/50">Total Channels</p>
+            </div>
+
+            {/* Total Downloads */}
+            <div className="bg-background-card border border-white/10 rounded-2xl p-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
+                  <Download className="w-6 h-6 text-purple-400" />
+                </div>
+              </div>
+              <p className="text-3xl font-bold text-white mb-1">
+                {history.reduce((sum, h) => sum + h.downloadedFiles, 0)}
+              </p>
+              <p className="text-sm text-white/50">Files Downloaded</p>
+            </div>
+
+            {/* Last Download */}
+            <div className="bg-background-card border border-white/10 rounded-2xl p-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500/20 to-red-500/20 flex items-center justify-center">
+                  <Clock className="w-6 h-6 text-orange-400" />
+                </div>
+              </div>
+              <p className="text-xl font-bold text-white mb-1 truncate">
+                {lastDownload ? new Date(lastDownload.completedAt).toLocaleDateString() : 'Never'}
+              </p>
+              <p className="text-sm text-white/50">Last Download</p>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── Quick Actions ────────────────────────────────────────────── */}
+        {isAuthenticated && (
+          <motion.section
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.16 }}
+            className="bg-background-card border border-white/10 rounded-2xl p-8"
+          >
+            <h2 className="text-lg font-semibold text-white mb-6">Quick Actions</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Browse Channels */}
+              <motion.button
+                whileHover={{ scale: 1.02, y: -2 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setActivePage('channels')}
+                className="group relative overflow-hidden bg-gradient-to-br from-accent-blue/10 to-accent-cyan/10 hover:from-accent-blue/20 hover:to-accent-cyan/20 border border-accent-blue/30 rounded-xl p-6 text-left transition-all"
+              >
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-accent-blue to-accent-cyan flex items-center justify-center shadow-glow-blue">
+                      <Radio className="w-6 h-6 text-white" />
+                    </div>
+                    <ArrowRight className="w-5 h-5 text-accent-blue group-hover:translate-x-1 transition-transform" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-1">Browse Channels</h3>
+                  <p className="text-sm text-white/60">View all your joined channels and their media</p>
+                </div>
+              </motion.button>
+
+              {/* View History */}
+              <motion.button
+                whileHover={{ scale: 1.02, y: -2 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setActivePage('history')}
+                className="group relative overflow-hidden bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-6 text-left transition-all"
+              >
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
+                      <Clock className="w-6 h-6 text-purple-400" />
+                    </div>
+                    <ArrowRight className="w-5 h-5 text-white/40 group-hover:translate-x-1 transition-transform" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-1">View History</h3>
+                  <p className="text-sm text-white/60">Browse your past downloads and sessions</p>
+                </div>
+              </motion.button>
+            </div>
+          </motion.section>
+        )}
+
+        {/* ── Recent Downloads ────────────────────────────────────────── */}
+        {isAuthenticated && recentDownloads.length > 0 && (
+          <motion.section
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.18 }}
+            className="bg-background-card border border-white/10 rounded-2xl p-6"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white">Recent Downloads</h2>
+              <button
+                onClick={() => setActivePage('history')}
+                className="text-xs text-accent-blue hover:text-accent-cyan transition-colors"
+              >
+                View All
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {recentDownloads.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-4 p-4 rounded-xl bg-white/5 border border-white/10"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-600/20 flex items-center justify-center">
+                    <Download className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{item.channelId}</p>
+                    <p className="text-xs text-white/40">
+                      {item.downloadedFiles} files • {new Date(item.completedAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <Folder className="w-5 h-5 text-white/30" />
+                </div>
+              ))}
+            </div>
+          </motion.section>
+        )}
+
+        {/* ── Connected Status (bottom) ───────────────────────────────── */}
+        {isAuthenticated && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.20 }}
+            className="flex items-center justify-between p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <p className="text-sm text-emerald-400 font-medium">
+                Connected to Telegram
+                {auth.phoneNumber && <span className="text-white/50 ml-2">• {auth.phoneNumber}</span>}
+              </p>
+            </div>
             <button
-              onClick={() => setShowApiHash(!showApiHash)}
-              className="text-white/30 hover:text-white/60 transition-colors"
-              tabIndex={-1}
+              onClick={handleLogout}
+              className="px-4 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 transition-all"
             >
-              {showApiHash ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              Logout
             </button>
-          }
-        />
-
-        {/* Connect button */}
-        {!auth.isAuthenticated && (
-          <motion.button
-            whileHover={!auth.isConnecting ? { scale: 1.01 } : {}}
-            whileTap={!auth.isConnecting ? { scale: 0.98 } : {}}
-            onClick={handleConnect}
-            disabled={auth.isConnecting || !credentials.apiId || !credentials.apiHash}
-            className={`
-              w-full py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold
-              transition-all duration-200
-              ${auth.isConnecting || !credentials.apiId || !credentials.apiHash
-                ? 'bg-white/5 text-white/25 cursor-not-allowed'
-                : 'bg-white/10 hover:bg-white/15 text-white border border-white/15 hover:border-white/25'
-              }
-            `}
-          >
-            {auth.isConnecting ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
-                Connecting…
-              </>
-            ) : (
-              <>
-                <Plug className="w-4 h-4" />
-                Connect to Telegram
-              </>
-            )}
-          </motion.button>
-        )}
-      </motion.section>
-
-      {/* ── Download config card ──────────────────────────────────────── */}
-      <motion.section
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.18 }}
-        className="bg-background-card border border-white/10 rounded-2xl p-5 space-y-4"
-      >
-        <h2 className="text-sm font-semibold text-white/80">Download Configuration</h2>
-
-        {/* Channel ID */}
-        <InputField
-          label="Channel ID"
-          value={credentials.channelId}
-          onChange={(v) => setCredentials({ channelId: v })}
-          type="text"
-          disabled={isRunning}
-          hint='Username (e.g. "mychannelname") or numeric ID'
-          autoComplete="off"
-        />
-
-        {/* Folder selector */}
-        <FolderSelector
-          path={credentials.downloadPath}
-          onChange={(p) => setCredentials({ downloadPath: p })}
-          disabled={isRunning}
-        />
-      </motion.section>
-
-      {/* ── Progress card (visible when not idle) ────────────────────── */}
-      {progress.status !== 'idle' && progress.status !== 'completed' && (
-        <motion.section
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-background-card border border-white/10 rounded-2xl p-5"
-        >
-          <ProgressBar
-            percent={progress.percent}
-            downloaded={progress.downloaded}
-            total={progress.total}
-            status={progress.status}
-            statusMessage={progress.statusMessage}
-            currentFile={progress.currentFile}
-            currentFileSize={progress.currentFileSize}
-            currentFileDownloaded={progress.currentFileDownloaded}
-            speed={progress.speed}
-            eta={progress.eta}
-          />
-        </motion.section>
-      )}
-
-      {/* ── Summary Card ──────────────────────────────────────────────── */}
-      {progress.status === 'completed' && (
-        <DownloadSummary
-          totalFiles={progress.total}
-          totalSize={progress.totalSize}
-          durationMs={progress.durationMs}
-          averageSpeed={progress.averageSpeed}
-          onDismiss={() => useDownloadStore.getState().setProgress({ status: 'idle' })}
-        />
-      )}
-
-      {/* ── Primary action button ─────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.22 }}
-      >
-        {isRunning ? (
-          <motion.button
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={handleCancelDownload}
-            className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2.5 text-sm font-bold
-                       bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 hover:border-red-500/50
-                       text-red-400 transition-all duration-200"
-          >
-            <StopCircle className="w-5 h-5" />
-            Cancel Download
-          </motion.button>
-        ) : (
-          <motion.button
-            whileHover={canDownload ? { scale: 1.01 } : {}}
-            whileTap={canDownload ? { scale: 0.98 } : {}}
-            onClick={handleStartDownload}
-            disabled={!canDownload}
-            className={`
-              w-full py-3.5 rounded-xl flex items-center justify-center gap-2.5 text-sm font-bold
-              transition-all duration-300
-              ${canDownload
-                ? 'bg-gradient-to-r from-accent-blue to-accent-cyan text-white shadow-glow-blue hover:shadow-glow-cyan hover:brightness-110'
-                : 'bg-white/5 text-white/20 cursor-not-allowed'
-              }
-            `}
-          >
-            <Download className="w-5 h-5" />
-            Start Download
-          </motion.button>
+          </motion.div>
         )}
 
-        {!auth.isAuthenticated && (
-          <p className="text-center text-xs text-white/25 mt-2">
-            Connect to Telegram first to enable downloads
-          </p>
-        )}
-      </motion.div>
+        {/* Subtle brand watermark */}
+        <div className="absolute bottom-6 right-6 text-white/5 text-6xl font-bold pointer-events-none select-none">
+          LOKI
+        </div>
+      </div>
     </motion.div>
   )
 }
