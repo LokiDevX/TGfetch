@@ -1,6 +1,6 @@
 {
   "name": "tgfetch",
-  "version": "1.0.3",
+  "version": "1.0.1",
   "description": "TGfetch – Premium Telegram Media Downloader",
   "main": "dist-electron/main.js",
   "author": {
