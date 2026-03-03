@@ -139,7 +139,8 @@ export class ChannelService {
     }
     
     // Convert to MediaItem
-    const items = messages.map(msg => this.messageToMediaItem(msg)).filter(Boolean) as MediaItem[]
+    const itemPromises = messages.map(msg => this.messageToMediaItem(msg))
+    const items = (await Promise.all(itemPromises)).filter(Boolean) as MediaItem[]
     
     return {
       items,
@@ -190,19 +191,33 @@ export class ChannelService {
   /**
    * Convert Telegram message to MediaItem
    */
-  private messageToMediaItem(msg: Api.Message): MediaItem | null {
+  private async messageToMediaItem(msg: Api.Message): Promise<MediaItem | null> {
     if (!msg.media) return null
     
     const media = msg.media
     
     // Handle photos
     if (media.className === 'MessageMediaPhoto') {
+      let thumbnail: string | undefined
+      try {
+        const photoBuffer = await this.client.downloadMedia(msg, {
+          isBig: false
+        }) as Buffer
+        
+        if (photoBuffer) {
+          thumbnail = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`
+        }
+      } catch (err) {
+        // Silently skip if photo download fails
+      }
+
       return {
         messageId: msg.id,
         fileName: `photo_${msg.id}.jpg`,
         size: 0, // Photos don't have size in metadata
         type: 'photo',
         date: new Date(msg.date * 1000),
+        thumbnail,
       }
     }
     
@@ -243,6 +258,23 @@ export class ChannelService {
       } else if (mimeType.startsWith('audio/')) {
         type = 'audio'
       }
+
+      // Fetch smallest thumbnail for videos/documents
+      let thumbnail: string | undefined
+      try {
+        if (doc.thumbs && doc.thumbs.length > 0) {
+          const thumb = doc.thumbs[0] // smallest
+          const thumbBuffer = await this.client.downloadMedia(msg, {
+            thumb: thumb
+          }) as Buffer
+          
+          if (thumbBuffer) {
+            thumbnail = `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`
+          }
+        }
+      } catch (err) {
+        // Silently skip if thumbnail download fails
+      }
       
       return {
         messageId: msg.id,
@@ -252,6 +284,7 @@ export class ChannelService {
         date: new Date(msg.date * 1000),
         duration,
         mimeType,
+        thumbnail,
       }
     }
     

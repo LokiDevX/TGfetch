@@ -19,6 +19,13 @@ import { TelegramService, type SessionData } from './services/telegramService'
 import { ChannelService } from './services/channelService'
 import { DownloadManager } from './services/downloadManager'
 
+import * as dotenv from 'dotenv'
+
+// Load environment variables
+const envPath = path.join(process.cwd(), '.env')
+console.log('Loading .env from:', envPath)
+dotenv.config({ path: envPath })
+
 // ─── Constants ─────────────────────────────────────────────────────────────
 
 const IS_DEV = process.env.NODE_ENV === 'development'
@@ -43,10 +50,21 @@ if (!gotLock) {
 }
 
 /**
- * 🔐 SECURITY: API credentials
+ * 🔐 SECURITY: API credentials from environment variables
  */
-const API_ID = 35192275
-const API_HASH = '482ac56d21bfe3d66572d1727116afe9'
+const API_ID = Number(process.env.TG_API_ID)
+const API_HASH = process.env.TG_API_HASH
+
+// Validate credentials early
+if (!API_ID || !API_HASH) {
+  const errorMsg = 'Missing Telegram API credentials. Please set TG_API_ID and TG_API_HASH in environment variables.'
+  console.error(errorMsg)
+  // On production, we might want to show a dialog before quitting
+  app.whenReady().then(() => {
+    dialog.showErrorBox('Configuration Error', errorMsg)
+    app.quit()
+  })
+}
 
 // ─── Services ──────────────────────────────────────────────────────────────
 
@@ -361,6 +379,10 @@ ipcMain.handle('download:downloadSingle', async (_event, channelId: string | num
   if (!downloadManager) {
     return { success: false, error: 'Not authenticated' }
   }
+
+  if (!downloadPath) {
+    return { success: false, error: 'Download path not set' }
+  }
   
   try {
     return await downloadManager.downloadSingle(channelId, messageId, downloadPath)
@@ -377,6 +399,10 @@ ipcMain.handle('download:downloadMultiple', async (_event, params: {
 }) => {
   if (!downloadManager) {
     return { success: false, error: 'Not authenticated' }
+  }
+
+  if (!params.downloadPath) {
+    return { success: false, error: 'Download path not set' }
   }
   
   try {

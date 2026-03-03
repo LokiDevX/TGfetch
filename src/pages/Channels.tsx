@@ -6,9 +6,10 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Loader2, Users, Lock, Hash, AlertCircle, Search, Filter, ArrowUpDown } from 'lucide-react'
+import { Loader2, Users, Lock, Hash, AlertCircle, Search, Filter, ArrowUpDown, Folder, CheckCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useDownloadStore } from '../store/downloadStore'
+import { FolderSelector } from '../components/FolderSelector'
 import type { ChannelInfo } from '../types/global'
 
 type FilterType = 'all' | 'public' | 'private'
@@ -20,7 +21,9 @@ export function Channels(): JSX.Element {
     channels, 
     setChannels, 
     setSelectedChannel, 
-    setActivePage 
+    setActivePage,
+    downloadPath,
+    setDownloadPath
   } = useDownloadStore()
   
   const [isLoading, setIsLoading] = useState(false)
@@ -54,6 +57,10 @@ export function Channels(): JSX.Element {
   }, [setChannels])
 
   const handleChannelClick = (channel: ChannelInfo) => {
+    if (!downloadPath) {
+      toast.error('Please select a download destination first')
+      return
+    }
     setSelectedChannel(channel)
     setActivePage('media')
   }
@@ -209,21 +216,63 @@ export function Channels(): JSX.Element {
       
       {/* Header with search and filters */}
       <div className="px-8 py-6 border-b border-white/5 relative z-10">
-        <div className="flex items-start justify-between mb-6">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8">
           <div>
             <h2 className="text-3xl font-bold text-white">Your Channels</h2>
             <p className="text-sm text-white/60 mt-2">
               Explore and manage your Telegram channels
             </p>
           </div>
-          <button
-            onClick={fetchChannels}
-            disabled={isLoading}
-            className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 text-sm transition-all hover:scale-105"
-          >
-            Refresh
-          </button>
+
+          <div className="flex flex-col sm:flex-row gap-4 lg:w-1/2 xl:w-1/3">
+            <div className="flex-1">
+              <FolderSelector 
+                path={downloadPath || ''} 
+                onChange={(path) => setDownloadPath(path || null)} 
+              />
+            </div>
+            
+            <button
+              onClick={fetchChannels}
+              disabled={isLoading}
+              className="h-[54px] px-6 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 text-sm font-medium transition-all hover:scale-[1.02] flex items-center justify-center gap-2 mt-auto"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
+
+        {!downloadPath && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="mb-8 p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-4 group"
+          >
+            <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center shrink-0">
+              <AlertCircle className="w-5 h-5 text-red-500" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white">Destination Required</p>
+              <p className="text-xs text-white/60">Please select a download folder at the top right before proceeding.</p>
+            </div>
+          </motion.div>
+        )}
+
+        {downloadPath && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="mb-8 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/10 flex items-center gap-4"
+          >
+            <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center shrink-0">
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white">Ready for Downloads</p>
+              <p className="text-xs text-white/60">Selected path: <code className="text-emerald-400/80">{downloadPath}</code></p>
+            </div>
+          </motion.div>
+        )}
 
         {/* Statistics row */}
         <div className="flex items-center gap-4 mb-6">
@@ -302,9 +351,15 @@ export function Channels(): JSX.Element {
               >
                 <button
                   onClick={() => handleChannelClick(channel)}
-                  className="w-full group"
+                  disabled={!downloadPath}
+                  className={`w-full group ${!downloadPath ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  <div className="relative bg-[#111827] rounded-2xl p-6 border border-white/10 backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_40px_rgba(0,0,0,0.5)] hover:border-blue-500/40">
+                  <div className={`relative bg-[#111827] rounded-2xl p-6 border transition-all duration-300 backdrop-blur-xl
+                    ${!downloadPath 
+                      ? 'border-white/5 grayscale saturate-50' 
+                      : 'border-white/10 hover:-translate-y-1 hover:shadow-[0_20px_40px_rgba(0,0,0,0.5)] hover:border-blue-500/40'
+                    }`}
+                  >
                     {/* Channel avatar */}
                     <div className="mb-4">
                       {channel.avatar ? (

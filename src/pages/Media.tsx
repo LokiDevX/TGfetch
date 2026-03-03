@@ -21,6 +21,7 @@ import {
   Music,
   Filter,
   AlertCircle,
+  Check,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useDownloadStore } from '../store/downloadStore'
@@ -43,14 +44,61 @@ export function Media(): JSX.Element {
     setMediaFilter,
     mediaSearchQuery,
     setMediaSearchQuery,
-    credentials,
+    downloadPath,
     addLog,
+    fileProgress,
+    setFileProgress,
+    fileStatuses,
+    setFileStatus,
+    resetFileProgress,
+    progress,
+    setProgress,
   } = useDownloadStore()
 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState(false)
-  const [downloadProgress, setDownloadProgress] = useState<Map<number, number>>(new Map())
+
+  // Register IPC download listeners
+  useEffect(() => {
+    const unsubFileStart = window.tgfetch.download.onFileStart((payload) => {
+      setFileStatus(payload.messageId, 'downloading')
+      setFileProgress(payload.messageId, 0)
+    })
+
+    const unsubFileProgress = window.tgfetch.download.onFileProgress((payload) => {
+      setFileProgress(payload.messageId, payload.percent)
+    })
+
+    const unsubFileComplete = window.tgfetch.download.onFileComplete((payload) => {
+      setFileStatus(payload.messageId, 'completed')
+      setFileProgress(payload.messageId, 100)
+    })
+
+    const unsubFileError = window.tgfetch.download.onFileError((payload) => {
+      setFileStatus(payload.messageId, 'error')
+      addLog({ type: 'error', message: `Failed to download ${payload.fileName}: ${payload.error}` })
+    })
+
+    const unsubTotal = window.tgfetch.download.onTotal((payload) => {
+      setProgress({ total: payload.total, downloaded: 0, percent: 0 })
+    })
+
+    const unsubComplete = window.tgfetch.download.onComplete((payload) => {
+      setIsDownloading(false)
+      setProgress({ ...payload, status: 'completed' })
+      toast.success('Download task completed!')
+    })
+
+    return () => {
+      unsubFileStart()
+      unsubFileProgress()
+      unsubFileComplete()
+      unsubFileError()
+      unsubTotal()
+      unsubComplete()
+    }
+  }, [setFileProgress, setFileStatus, setProgress, addLog])
 
   // Fetch media on mount
   useEffect(() => {
@@ -87,7 +135,7 @@ export function Media(): JSX.Element {
       return
     }
 
-    if (!credentials.downloadPath) {
+    if (!downloadPath) {
       toast.error('Please select a download folder first')
       return
     }
@@ -95,6 +143,7 @@ export function Media(): JSX.Element {
     if (!selectedChannel) return
 
     setIsDownloading(true)
+    resetFileProgress()
     const messageIds = Array.from(selectedMediaIds)
 
     try {
@@ -103,7 +152,7 @@ export function Media(): JSX.Element {
       const result = await window.tgfetch.download.downloadMultiple({
         channelId: selectedChannel.id,
         messageIds,
-        downloadPath: credentials.downloadPath,
+        downloadPath: downloadPath,
       })
 
       if (result.success) {
@@ -119,11 +168,11 @@ export function Media(): JSX.Element {
     } finally {
       setIsDownloading(false)
     }
-  }, [selectedMediaIds, credentials.downloadPath, selectedChannel, clearMediaSelection, addLog])
+  }, [selectedMediaIds, downloadPath, selectedChannel, clearMediaSelection, addLog, resetFileProgress])
 
   const handleDownloadSingle = useCallback(
     async (item: MediaItem) => {
-      if (!credentials.downloadPath) {
+      if (!downloadPath) {
         toast.error('Please select a download folder first')
         return
       }
@@ -136,7 +185,7 @@ export function Media(): JSX.Element {
         const result = await window.tgfetch.download.downloadSingle(
           selectedChannel.id,
           item.messageId,
-          credentials.downloadPath
+          downloadPath
         )
 
         if (result.success) {
@@ -163,7 +212,7 @@ export function Media(): JSX.Element {
         })
       }
     },
-    [credentials.downloadPath, selectedChannel]
+    [downloadPath, selectedChannel]
   )
 
   if (!selectedChannel) {
@@ -232,8 +281,10 @@ export function Media(): JSX.Element {
             {selectedMediaIds.size > 0 && (
               <button
                 onClick={handleDownloadSelected}
-                disabled={isDownloading}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-accent-blue to-accent-cyan text-white text-sm font-semibold hover:shadow-glow-blue transition-all flex items-center gap-2"
+                disabled={isDownloading || !downloadPath}
+                className={`px-4 py-2 rounded-xl bg-gradient-to-r from-accent-blue to-accent-cyan text-white text-sm font-semibold hover:shadow-glow-blue transition-all flex items-center gap-2 ${
+                  !downloadPath ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               >
                 <Download className="w-4 h-4" />
                 Download ({selectedMediaIds.size})
@@ -283,8 +334,26 @@ export function Media(): JSX.Element {
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-8">
+      <div className="flex-1 overflow-y-auto p-8 pt-0">
+        {/* Global Progress Summary */}
+        {isDownloading && progress.total > 0 && (
+          <div className="sticky top-0 z-10 py-4 bg-background-main/80 backdrop-blur-md mb-6 border-b border-white/10">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-white/70">
+                Downloading: {progress.downloaded} / {progress.total} files
+              </span>
+              <span className="text-sm font-bold text-accent-blue">{progress.percent}%</span>
+            </div>
+            <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${progress.percent}%` }}
+                className="h-full bg-gradient-to-r from-accent-blue to-accent-cyan shadow-glow-blue"
+              />
+            </div>
+          </div>
+        )}
+
         {isLoading ? (
           <div className="flex items-center justify-center h-64">
             <Loader2 className="w-8 h-8 text-accent-blue animate-spin" />
@@ -311,7 +380,8 @@ export function Media(): JSX.Element {
                 isSelected={selectedMediaIds.has(item.messageId)}
                 onToggleSelect={() => toggleMediaSelection(item.messageId)}
                 onDownload={() => handleDownloadSingle(item)}
-                isDownloading={downloadProgress.has(item.messageId)}
+                status={fileStatuses[item.messageId] || 'idle'}
+                progress={fileProgress[item.messageId] || 0}
               />
             ))}
           </div>
@@ -324,7 +394,8 @@ export function Media(): JSX.Element {
                 isSelected={selectedMediaIds.has(item.messageId)}
                 onToggleSelect={() => toggleMediaSelection(item.messageId)}
                 onDownload={() => handleDownloadSingle(item)}
-                isDownloading={downloadProgress.has(item.messageId)}
+                status={fileStatuses[item.messageId] || 'idle'}
+                progress={fileProgress[item.messageId] || 0}
               />
             ))}
           </div>
@@ -340,30 +411,79 @@ interface MediaCardProps {
   isSelected: boolean
   onToggleSelect: () => void
   onDownload: () => void
-  isDownloading: boolean
+  status: 'idle' | 'downloading' | 'completed' | 'error'
+  progress: number
 }
 
-function MediaCard({ item, isSelected, onToggleSelect, onDownload, isDownloading }: MediaCardProps): JSX.Element {
+function MediaCard({ item, isSelected, onToggleSelect, onDownload, status, progress }: MediaCardProps): JSX.Element {
   const icon = getMediaIcon(item.type)
+  const isDownloading = status === 'downloading'
+  const isCompleted = status === 'completed'
 
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="group relative bg-background-card border border-white/10 rounded-xl overflow-hidden hover:border-accent-blue/50 transition-all"
+      className={`group relative bg-background-card border rounded-xl overflow-hidden transition-all ${
+        isSelected ? 'border-accent-blue' : 'border-white/10 hover:border-accent-blue/50'
+      }`}
     >
       {/* Thumbnail/Icon */}
-      <div className="aspect-square bg-gradient-to-br from-accent-blue/10 to-accent-cyan/10 flex items-center justify-center">
-        {icon}
+      <div className="aspect-square bg-gradient-to-br from-accent-blue/10 to-accent-cyan/10 flex items-center justify-center relative overflow-hidden">
+        {item.thumbnail ? (
+          <img src={item.thumbnail} alt="" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+        ) : (
+          icon
+        )}
+        
+        {/* Progress Overlay */}
+        {isDownloading && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[2px]">
+            <div className="text-center">
+              <div className="relative w-12 h-12 mb-1">
+                <svg className="w-12 h-12 transform -rotate-90">
+                  <circle
+                    cx="24"
+                    cy="24"
+                    r="20"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="transparent"
+                    className="text-white/10"
+                  />
+                  <motion.circle
+                    cx="24"
+                    cy="24"
+                    r="20"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="transparent"
+                    strokeLinecap="round"
+                    className="text-accent-blue"
+                    initial={{ strokeDasharray: '126 126', strokeDashoffset: 126 }}
+                    animate={{ strokeDashoffset: 126 - (126 * progress) / 100 }}
+                    transition={{ type: 'spring', bounce: 0, duration: 0.5 }}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center items-center">
+                  <span className="text-[10px] font-bold text-white">{progress}%</span>
+                </div>
+              </div>
+              <span className="text-[10px] text-white/70 font-medium bg-black/40 px-2 py-0.5 rounded-full">Downloading...</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Info */}
       <div className="p-3">
         <p className="text-xs text-white font-medium truncate mb-1">{item.fileName}</p>
-        <p className="text-xs text-white/40">{formatFileSize(item.size)}</p>
-        {item.duration && (
-          <p className="text-xs text-white/40">{formatDuration(item.duration)}</p>
-        )}
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-white/40">{formatFileSize(item.size)}</p>
+          {item.duration && (
+            <p className="text-[10px] text-white/40">{formatDuration(item.duration)}</p>
+          )}
+        </div>
       </div>
 
       {/* Overlay actions */}
@@ -378,31 +498,41 @@ function MediaCard({ item, isSelected, onToggleSelect, onDownload, isDownloading
             <Square className="w-5 h-5 text-white" />
           )}
         </button>
-        <button
-          onClick={onDownload}
-          disabled={isDownloading}
-          className="p-2.5 rounded-lg bg-accent-blue hover:bg-accent-cyan backdrop-blur transition-colors disabled:opacity-50"
-        >
-          {isDownloading ? (
-            <Loader2 className="w-5 h-5 text-white animate-spin" />
-          ) : (
-            <Download className="w-5 h-5 text-white" />
-          )}
-        </button>
+        {isCompleted ? (
+          <div className="p-2.5 rounded-lg bg-green-500/20 text-green-400 backdrop-blur">
+            <Check className="w-5 h-5" />
+          </div>
+        ) : (
+          <button
+            onClick={onDownload}
+            disabled={isDownloading}
+            className="p-2.5 rounded-lg bg-accent-blue hover:bg-accent-cyan backdrop-blur transition-colors disabled:opacity-0"
+          >
+            {isDownloading ? (
+              <Loader2 className="w-5 h-5 text-white animate-spin opacity-0" />
+            ) : (
+              <Download className="w-5 h-5 text-white" />
+            )}
+          </button>
+        )}
       </div>
     </motion.div>
   )
 }
 
 // Media List Item Component (List View)
-function MediaListItem({ item, isSelected, onToggleSelect, onDownload, isDownloading }: MediaCardProps): JSX.Element {
+function MediaListItem({ item, isSelected, onToggleSelect, onDownload, status, progress }: MediaCardProps): JSX.Element {
   const icon = getMediaIcon(item.type, 'w-5 h-5')
+  const isDownloading = status === 'downloading'
+  const isCompleted = status === 'completed'
 
   return (
     <motion.div
       initial={{ opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
-      className="flex items-center gap-4 p-4 rounded-xl bg-background-card border border-white/10 hover:border-accent-blue/50 transition-all"
+      className={`flex items-center gap-4 p-4 rounded-xl bg-background-card border transition-all ${
+        isSelected ? 'border-accent-blue' : 'border-white/10 hover:border-accent-blue/50'
+      }`}
     >
       {/* Select checkbox */}
       <button onClick={onToggleSelect} className="flex-shrink-0">
@@ -413,29 +543,58 @@ function MediaListItem({ item, isSelected, onToggleSelect, onDownload, isDownloa
         )}
       </button>
 
-      {/* Icon */}
-      <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-accent-blue/10 to-accent-cyan/10 flex items-center justify-center">
-        {icon}
+      {/* Icon/Thumbnail */}
+      <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-gradient-to-br from-accent-blue/10 to-accent-cyan/10 flex items-center justify-center overflow-hidden relative">
+        {item.thumbnail ? (
+          <img src={item.thumbnail} alt="" className="w-full h-full object-cover" />
+        ) : (
+          icon
+        )}
+        {isDownloading && (
+          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+            <span className="text-[10px] font-bold text-accent-blue">{progress}%</span>
+          </div>
+        )}
       </div>
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-white font-medium truncate">{item.fileName}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-white font-medium truncate">{item.fileName}</p>
+          {isCompleted && <Check className="w-3.5 h-3.5 text-green-400" />}
+        </div>
         <div className="flex items-center gap-3 text-xs text-white/40 mt-0.5">
           <span>{formatFileSize(item.size)}</span>
           {item.duration && <span>{formatDuration(item.duration)}</span>}
           <span>{new Date(item.date).toLocaleDateString()}</span>
         </div>
+        {isDownloading && (
+          <div className="mt-2 h-1 bg-white/5 rounded-full overflow-hidden">
+            <motion.div 
+              className="h-full bg-accent-blue"
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
       </div>
 
       {/* Download button */}
       <button
         onClick={onDownload}
-        disabled={isDownloading}
-        className="flex-shrink-0 p-2 rounded-lg bg-accent-blue/20 hover:bg-accent-blue/30 text-accent-blue transition-colors disabled:opacity-50"
+        disabled={isDownloading || isCompleted}
+        className={`flex-shrink-0 p-2 rounded-lg transition-colors ${
+          isCompleted 
+            ? 'bg-green-500/10 text-green-400' 
+            : isDownloading 
+              ? 'bg-accent-blue/10 text-accent-blue opacity-50'
+              : 'bg-accent-blue/20 hover:bg-accent-blue/30 text-accent-blue'
+        }`}
       >
         {isDownloading ? (
           <Loader2 className="w-5 h-5 animate-spin" />
+        ) : isCompleted ? (
+          <Check className="w-5 h-5" />
         ) : (
           <Download className="w-5 h-5" />
         )}

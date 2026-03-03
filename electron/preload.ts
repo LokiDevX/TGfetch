@@ -41,6 +41,7 @@ export interface ProgressPayload {
 }
 
 export interface FileCompletePayload {
+  messageId: number
   fileName: string
   downloaded: number
   total: number
@@ -48,6 +49,7 @@ export interface FileCompletePayload {
 }
 
 export interface FileErrorPayload {
+  messageId: number
   fileName: string
   error: string
 }
@@ -186,9 +188,9 @@ const tgfetchAPI = {
       on('download:status', cb as (...args: unknown[]) => void),
     onTotal: (cb: (payload: { total: number }) => void) =>
       on('download:total', cb as (...args: unknown[]) => void),
-    onFileStart: (cb: (payload: { fileName: string; fileIndex: number; total: number }) => void) =>
+    onFileStart: (cb: (payload: { messageId: number; fileName: string; fileIndex: number; total: number }) => void) =>
       on('download:fileStart', cb as (...args: unknown[]) => void),
-    onFileProgress: (cb: (payload: { fileName: string; percent: number }) => void) =>
+    onFileProgress: (cb: (payload: { messageId: number; fileName: string; percent: number }) => void) =>
       on('download:fileProgress', cb as (...args: unknown[]) => void),
     onFileComplete: (cb: (payload: FileCompletePayload) => void) =>
       on('download:fileComplete', cb as (...args: unknown[]) => void),

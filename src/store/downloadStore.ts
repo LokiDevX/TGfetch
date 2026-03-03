@@ -77,6 +77,10 @@ interface DownloadStore {
   activityLogOpen: boolean
   setActivityLogOpen: (open: boolean) => void
 
+  // Download Path
+  downloadPath: string | null
+  setDownloadPath: (path: string | null) => void
+
   // Channel & Media Management
   channels: ChannelInfo[]
   setChannels: (channels: ChannelInfo[]) => void
@@ -100,6 +104,13 @@ interface DownloadStore {
   
   mediaSearchQuery: string
   setMediaSearchQuery: (query: string) => void
+
+  // Per-file progress tracking
+  fileProgress: Record<number, number>
+  setFileProgress: (messageId: number, percent: number) => void
+  fileStatuses: Record<number, 'idle' | 'downloading' | 'completed' | 'error'>
+  setFileStatus: (messageId: number, status: 'idle' | 'downloading' | 'completed' | 'error') => void
+  resetFileProgress: () => void
 }
 
 const DEFAULT_CREDENTIALS: Credentials = {
@@ -173,6 +184,9 @@ export const useDownloadStore = create<DownloadStore>()(
       activityLogOpen: true,
       setActivityLogOpen: (open) => set({ activityLogOpen: open }),
 
+      downloadPath: null,
+      setDownloadPath: (path) => set({ downloadPath: path }),
+
       // Channel & Media Management
       channels: [],
       setChannels: (channels) => set({ channels }),
@@ -213,6 +227,19 @@ export const useDownloadStore = create<DownloadStore>()(
       
       mediaSearchQuery: '',
       setMediaSearchQuery: (query) => set({ mediaSearchQuery: query }),
+
+      // Per-file progress
+      fileProgress: {},
+      setFileProgress: (messageId, percent) =>
+        set((state) => ({
+          fileProgress: { ...state.fileProgress, [messageId]: percent }
+        })),
+      fileStatuses: {},
+      setFileStatus: (messageId, status) =>
+        set((state) => ({
+          fileStatuses: { ...state.fileStatuses, [messageId]: status }
+        })),
+      resetFileProgress: () => set({ fileProgress: {}, fileStatuses: {} }),
     }),
     {
       name: 'tgfetch-store',
@@ -225,6 +252,7 @@ export const useDownloadStore = create<DownloadStore>()(
         sidebarCollapsed: state.sidebarCollapsed,
         activityLogOpen: state.activityLogOpen,
         mediaView: state.mediaView,
+        downloadPath: state.downloadPath,
       }),
     }
   )
