@@ -15,7 +15,6 @@
   <img alt="Electron" src="https://img.shields.io/badge/Electron-29-47848F?style=for-the-badge&logo=electron&logoColor=white" />
   <img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-Strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
-  <img alt="License" src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
 </p>
 
 ---
@@ -352,3 +351,4 @@ This project is open-source and available under the [MIT License](LICENSE).
   Made with ❤️ by <a href="https://github.com/LokiDevX">Loki</a><br/>
   <sub>If you find TGfetch useful, consider giving the repo a ⭐</sub>
 </p>
+
