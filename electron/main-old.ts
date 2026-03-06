@@ -40,8 +40,8 @@ const HISTORY_FILE = path.join(USER_DATA, 'history.json')
  * ⚠️ IMPORTANT: Replace these with your actual Telegram API credentials from:
  * https://my.telegram.org/apps
  */
-const API_ID = 35192275
-const API_HASH = '482ac56d21bfe3d66572d1727116afe9'
+const API_ID = 
+const API_HASH = ''
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
