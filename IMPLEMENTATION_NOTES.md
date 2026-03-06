@@ -4,7 +4,7 @@
 
 ### 1. `electron/main.ts`
 **Changes:**
-- ✅ Added hardcoded `API_ID` and `API_HASH` constants (lines 34-43)
+- ✅ `API_ID` and `API_HASH` loaded from environment variables or user-provided credentials
 - ✅ Implemented `AuthStatus` type with state machine states
 - ✅ Updated `SessionData` interface to remove apiId/apiHash
 - ✅ Added auth state tracking: `authStatus`, `phoneNumber`, promise resolvers
@@ -129,16 +129,16 @@ idle
 ### 🔐 Security Decision Tree
 
 **Q: Where should API credentials be stored?**  
-A: Main process only, hardcoded constant
+A: In a `.env` file (git-ignored) or entered by the user at first launch. Never hardcoded in source.
 
 **Q: Where should session strings be stored?**  
-A: Encrypted in userData directory
+A: In the userData directory (`app.getPath('userData')`)
 
 **Q: What auth data can renderer access?**  
 A: Only status, phone number (for display), generic error messages
 
 **Q: Should we pass credentials via IPC?**  
-A: NO. Use hardcoded constants in main process.
+A: Only at initial setup. They are then stored securely in the userData directory.
 
 ---
 
@@ -287,7 +287,7 @@ BREAKING CHANGE: Users must configure API credentials in main.ts
 
 ### Before Release
 
-1. **Update API Credentials:** Replace placeholders in `electron/main.ts`
+1. **Set API Credentials:** Create `.env` from `.env.example` or let users provide them at first launch
 2. **Test All Auth Flows:** Use checklist above
 3. **Build for Target Platforms:** Linux, Windows, macOS
 4. **Test Packaged App:** Session persistence in production

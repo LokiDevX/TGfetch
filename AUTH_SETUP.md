@@ -2,7 +2,7 @@
 
 ## Overview
 
-TGfetch now uses a **clean, secure authentication flow** where API credentials are hardcoded in the Electron main process and never exposed to the renderer. Users only see a simple "Connect Telegram" button.
+TGfetch uses a **clean, secure authentication flow** where API credentials are loaded from environment variables or entered by the user at first launch. Credentials are stored securely in the Electron userData directory and are never exposed to the renderer.
 
 ## 🚀 Quick Setup
 
@@ -17,25 +17,26 @@ TGfetch now uses a **clean, secure authentication flow** where API credentials a
 
 ### 2. Configure API Credentials
 
-Open `electron/main.ts` and replace the placeholder values around **line 34**:
+Copy the example env file and fill in your credentials:
 
-```typescript
-/**
- * 🔐 SECURITY: API credentials are hardcoded here and NEVER exposed to renderer.
- * These credentials are used exclusively in the main process for Telegram authentication.
- * 
- * ⚠️ IMPORTANT: Replace these with your actual Telegram API credentials from:
- * https://my.telegram.org/apps
- */
-const API_ID = 123456 // Replace with your API ID
-const API_HASH = 'your_api_hash_here' // Replace with your API Hash
+```bash
+cp .env.example .env
 ```
 
-**Example:**
-```typescript
-const API_ID = 9876543
-const API_HASH = 'abcdef1234567890abcdef1234567890'
+Then edit `.env`:
+
+```env
+TG_API_ID=123456          # Replace with your API ID
+TG_API_HASH=your_api_hash_here  # Replace with your API Hash
 ```
+
+**Example with real format:**
+```env
+TG_API_ID=9876543
+TG_API_HASH=abcdef1234567890abcdef1234567890
+```
+
+Alternatively, launch the app and enter your credentials in the **API Setup Screen** on first run.
 
 ### 3. Build and Run
 
@@ -44,7 +45,7 @@ npm run build
 npm run build:linux  # or build:win for Windows
 ```
 
-That's it! Your users will never see or need to enter these credentials.
+That's it! Your users will see a setup screen if credentials aren't configured, or a simple "Connect Telegram" button if they are.
 
 ---
 
@@ -70,7 +71,7 @@ The auth system uses a clean state machine with these states:
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Main Process                         │
-│  • Stores API_ID and API_HASH                           │
+│  • Loads API_ID and API_HASH from env / stored config    │
 │  • Manages TelegramClient                               │
 │  • Handles authentication flow                          │
 │  • Saves/loads session from userData                    │
@@ -95,7 +96,7 @@ The auth system uses a clean state machine with these states:
 ### ✅ What's Secure
 
 1. **API credentials never leave main process**
-   - Hardcoded in main.ts
+   - Loaded from `.env` or userData config
    - Not accessible from renderer
    - Not logged or exposed
 
@@ -294,8 +295,9 @@ Verification code: **22222** (always)
 - Security risk: credentials exposed to renderer
 
 **After:**
-- API credentials hardcoded in main.ts
-- Users only click "Connect Telegram"
+- API credentials loaded from `.env` file or entered on first launch
+- Stored securely in `app.getPath('userData')`
+- Users click "Connect Telegram" for authentication
 - Interactive prompts for phone/code/password
 - Credentials never leave main process
 
@@ -320,10 +322,11 @@ When contributing authentication-related changes:
 
 1. Never log credentials or session strings
 2. Never expose API_ID or API_HASH to renderer
-3. Always handle errors gracefully
-4. Update state machine if adding new states
-5. Add toast notifications for user feedback
-6. Test session persistence
+3. Load credentials from `.env` or userData, never hardcode in source
+4. Always handle errors gracefully
+5. Update state machine if adding new states
+6. Add toast notifications for user feedback
+7. Test session persistence
 
 ---
 

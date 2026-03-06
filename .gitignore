@@ -1,8 +1,37 @@
+# ─── Dependencies ─────────────────────────────────────────
 node_modules/
+
+# ─── Build output ─────────────────────────────────────────
 dist/
 dist-electron/
 release/
-.DS_Store
-*.log
+build/
+*.exe
+*.AppImage
+*.blockmap
+
+# ─── Environment & Secrets ────────────────────────────────
 .env
 .env.local
+.env.*.local
+*.session
+sessions/
+credentials.json
+
+# ─── Logs ─────────────────────────────────────────────────
+*.log
+
+# ─── Build cache ──────────────────────────────────────────
+*.tsbuildinfo
+
+# ─── OS files ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ─── IDE ──────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

@@ -10,13 +10,21 @@
 ### Step 1: Get Telegram API Credentials
 Visit [https://my.telegram.org/apps](https://my.telegram.org/apps) and create an app.
 
-### Step 2: Update main.ts
-Open `electron/main.ts` (line 34) and replace:
+### Step 2: Configure credentials
+Copy the example environment file and add your values:
 
-```typescript
-const API_ID = 123456  // Your API ID
-const API_HASH = 'your_api_hash_here'  // Your API Hash
+```bash
+cp .env.example .env
 ```
+
+Then edit `.env`:
+
+```env
+TG_API_ID=123456          # Your API ID
+TG_API_HASH=your_api_hash_here  # Your API Hash
+```
+
+Alternatively, launch the app — you'll be prompted to enter your credentials on first run.
 
 ### Step 3: Build & Run
 ```bash

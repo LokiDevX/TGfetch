@@ -175,8 +175,7 @@ downloadMultiple({
 ### Main Process (Electron)
 ```
 electron/
-├── main.ts                 # New refactored main (uses services)
-├── main-old.ts             # Backup of original
+├── main.ts                 # Refactored main (uses services)
 ├── preload.ts              # Updated IPC API
 └── services/
     ├── telegramService.ts  # Auth & client
@@ -352,7 +351,6 @@ npm run build:win
 
 ## 📝 Notes
 
-- **Old main.ts** backed up as `electron/main-old.ts`
 - All changes are **backwards compatible**
 - Existing download functionality preserved
 - Legacy `download:start` IPC method still works

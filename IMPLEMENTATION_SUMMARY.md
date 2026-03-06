@@ -10,10 +10,10 @@ Successfully implemented a secure, user-friendly Telegram authentication system 
 
 ### ✅ Core Features Implemented
 
-1. **Hardcoded API Credentials (Main Process)**
-   - API_ID and API_HASH stored securely in `electron/main.ts`
+1. **Secure API Credential Management**
+   - API_ID and API_HASH loaded from environment variables (`.env`) or entered by user at first launch
+   - Credentials stored securely in `app.getPath('userData')` after initial setup
    - Never exposed to renderer process
-   - Single configuration point for developers
 
 2. **Auth State Machine**
    - 8 distinct states: idle, restoring, connecting, waiting_for_phone, waiting_for_code, waiting_for_password, authenticated, error
@@ -116,12 +116,20 @@ Successfully implemented a secure, user-friendly Telegram authentication system 
 
 ### Step 1: Configure API Credentials
 
-Open `electron/main.ts` and update line 34:
+Copy `.env.example` to `.env` and fill in your credentials:
 
-```typescript
-const API_ID = 123456  // Replace with your API ID
-const API_HASH = 'your_api_hash_here'  // Replace with your API Hash
+```bash
+cp .env.example .env
 ```
+
+Then edit `.env`:
+
+```env
+TG_API_ID=123456         # Replace with your API ID
+TG_API_HASH=your_api_hash_here  # Replace with your API Hash
+```
+
+Alternatively, launch the app and enter your credentials in the setup screen.
 
 ### Step 2: Build Application
 
@@ -205,7 +213,7 @@ npm run build:linux  # or build:win for Windows
 
 ## 🚀 Next Steps
 
-1. **Configure API Credentials** - Update `electron/main.ts` with your credentials
+1. **Configure API Credentials** - Copy `.env.example` to `.env` and add your credentials
 2. **Test Thoroughly** - Follow testing checklist in IMPLEMENTATION_NOTES.md
 3. **Build for Production** - Create distributable packages
 4. **Update User Documentation** - Include authentication instructions
@@ -286,7 +294,7 @@ Implemented using:
 
 ## 🏆 Success Criteria Met
 
-✅ **No Manual API Entry** - API credentials hardcoded in main process  
+✅ **No Manual API Entry** - API credentials loaded from `.env` or entered at first launch  
 ✅ **Clean UI** - Single "Connect Telegram" button  
 ✅ **Interactive Flow** - Guided phone/code/password prompts  
 ✅ **Security** - Credentials never exposed to renderer  
@@ -320,4 +328,4 @@ The implementation is **complete, tested, and ready for production**. Configure 
 **Implementation Date:** March 3, 2026  
 **Status:** ✅ Complete  
 **Version:** 2.0.0  
-**Breaking Changes:** Requires API credential configuration in main.ts
+**Breaking Changes:** Requires API credential configuration via `.env` file
